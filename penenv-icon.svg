@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="#0D0D0D" stroke="#00FF00" stroke-width="4"/>
+  
+  <!-- Computer monitor frame -->
+  <rect x="48" y="60" width="160" height="110" rx="4" fill="#1A1A1A" stroke="#00FF00" stroke-width="3"/>
+  
+  <!-- Computer screen with matrix effect -->
+  <rect x="56" y="68" width="144" height="94" fill="#000000"/>
+  
+  <!-- Matrix-style falling characters -->
+  <text x="70" y="90" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.9">10101010</text>
+  <text x="70" y="105" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.7">01010101</text>
+  <text x="70" y="120" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.5">11001100</text>
+  <text x="70" y="135" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.3">00110011</text>
+  <text x="70" y="150" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.2">10100101</text>
+  
+  <text x="110" y="85" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.8">01110111</text>
+  <text x="110" y="100" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.9">11001001</text>
+  <text x="110" y="115" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.6">00111100</text>
+  <text x="110" y="130" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.4">10010110</text>
+  <text x="110" y="145" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.3">01101001</text>
+  
+  <text x="150" y="95" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.7">11110000</text>
+  <text x="150" y="110" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.8">00001111</text>
+  <text x="150" y="125" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.5">10101010</text>
+  <text x="150" y="140" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.4">01010101</text>
+  <text x="150" y="155" font-family="monospace" font-size="10" fill="#00FF00" opacity="0.2">11001100</text>
+  
+  <!-- Computer stand -->
+  <rect x="110" y="170" width="36" height="8" fill="#1A1A1A" stroke="#00FF00" stroke-width="2"/>
+  <path d="M 90 178 L 166 178 L 156 190 L 100 190 Z" fill="#1A1A1A" stroke="#00FF00" stroke-width="2"/>
+  
+  <!-- Terminal prompt accent -->
+  <text x="62" y="78" font-family="monospace" font-size="11" fill="#00FF00" font-weight="bold">&gt;_</text>
+  
+  <!-- Glowing effect around screen -->
+  <rect x="56" y="68" width="144" height="94" fill="none" stroke="#00FF00" stroke-width="1" opacity="0.5"/>
+</svg>

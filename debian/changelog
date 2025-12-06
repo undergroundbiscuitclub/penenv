@@ -1,0 +1,10 @@
+penenv (0.1.0-1) unstable; urgency=medium
+
+  * Initial release
+  * GTK4 desktop application
+  * Multiple shell tabs with full bash functionality
+  * Markdown notes with syntax highlighting
+  * Command logging with automatic refresh
+  * Target management with popup selector
+
+ -- undergroundbiscuitclub <noreply@example.com>  Thu, 05 Dec 2025 00:00:00 +0000

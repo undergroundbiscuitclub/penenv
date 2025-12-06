@@ -1,0 +1,31 @@
+Source: penenv
+Section: utils
+Priority: optional
+Maintainer: undergroundbiscuitclub <noreply@example.com>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc,
+               libgtk-4-dev,
+               libadwaita-1-dev,
+               libvte-2.91-gtk4-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/undergroundbiscuitclub/penenv_rust
+
+Package: penenv
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         libgtk-4-1,
+         libadwaita-1-0,
+         libvte-2.91-gtk4-0,
+         bash
+Description: Pentesting environment with integrated shells and note-taking
+ PenEnv is a modern GTK4 desktop application for managing penetration testing
+ environments with integrated shells, note-taking, and target management.
+ .
+ Features:
+  * Multiple shell tabs with full bash functionality
+  * Tab completion and all terminal features
+  * Target management with dropdown and popup selector
+  * Auto-saving notes with markdown syntax highlighting
+  * Command logging with automatic log refresh
+  * Tab renaming and keyboard shortcuts

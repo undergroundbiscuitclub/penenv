@@ -1,0 +1,159 @@
+commands:
+  # Network Scanning
+  - name: "Nmap - Quick Scan"
+    command: "sudo nmap -sSV {target}"
+    description: "Quick nmap scan with version detection and default scripts"
+    category: "Network Scanning"
+    
+  - name: "Nmap - Full TCP"
+    command: "sudo nmap -sSV -p- {target}"
+    description: "Full TCP port scan with service detection"
+    category: "Network Scanning"
+    
+  - name: "Nmap - UDP Scan"
+    command: "nmap -sUCV --top-ports 100 {target}"
+    description: "Scan top 100 UDP ports with service detection and default scripts"
+    category: "Network Scanning"
+    
+  - name: "Nmap - Aggressive Scan"
+    command: "nmap -A -T4 {target}"
+    description: "Aggressive scan with OS detection, version detection, script scanning, and traceroute"
+    category: "Network Scanning"
+    
+  # Web Application Testing
+  - name: "Nikto - Web Scan"
+    command: "nikto -h {target}"
+    description: "Web server vulnerability scanner"
+    category: "Web Application"
+    
+  - name: "Gobuster - Directory Brute Force"
+    command: "gobuster dir -u http://{target} -w /usr/share/wordlists/dirb/common.txt"
+    description: "Directory and file brute forcing"
+    category: "Web Application"
+    
+  - name: "Ffuf - Fuzzing"
+    command: "ffuf -u http://{target}/FUZZ -w /usr/share/wordlists/dirb/common.txt"
+    description: "Fast web fuzzer"
+    category: "Web Application"
+    
+  - name: "WhatWeb"
+    command: "whatweb {target}"
+    description: "Web technology fingerprinting"
+    category: "Web Application"
+    
+  - name: "TestSSL"
+    command: "testssl.sh {target}:{port}"
+    description: "SSL/TLS security assessment"
+    category: "Web Application"
+    
+  # Vulnerability Scanning
+  - name: "Nuclei - Vulnerability Scan"
+    command: "nuclei -u {target}"
+    description: "Fast vulnerability scanner using templates"
+    category: "Vulnerability Scanning"
+    
+  - name: "Nuclei - CVE Scan"
+    command: "nuclei -u {target} -t cves/"
+    description: "Scan specifically for CVEs"
+    category: "Vulnerability Scanning"
+
+  - name: "Nuclei - Update Templates"
+    command: "nuclei -ut"
+    description: "Update Nuclei templates"
+    category: "Vulnerability Scanning"
+
+  # DNS Enumeration
+  - name: "Dig - DNS Lookup"
+    command: "dig {target}"
+    description: "DNS lookup utility"
+    category: "DNS Enumeration"
+    
+  - name: "DNSEnum"
+    command: "dnsenum {target}"
+    description: "DNS enumeration tool"
+    category: "DNS Enumeration"
+    
+  - name: "Fierce - DNS"
+    command: "fierce --domain {target}"
+    description: "DNS reconnaissance tool"
+    category: "DNS Enumeration"
+    
+  # SMB Enumeration
+  - name: "SMBClient - List Shares"
+    command: "smbclient -L //{target} -N"
+    description: "List SMB shares"
+    category: "SMB Enumeration"
+    
+  - name: "Enum4Linux"
+    command: "enum4linux -a {target}"
+    description: "Enumerate SMB shares and users"
+    category: "SMB Enumeration"
+    
+  - name: "CrackMapExec - SMB"
+    command: "crackmapexec smb {target}"
+    description: "SMB enumeration and exploitation"
+    category: "SMB Enumeration"
+    
+  # Exploitation
+  - name: "Metasploit Console"
+    command: "msfconsole"
+    description: "Launch Metasploit Framework console"
+    category: "Exploitation"
+    
+  - name: "SQLMap - SQL Injection"
+    command: "sqlmap -u http://{target} --batch --dbs"
+    description: "Automated SQL injection tool"
+    category: "Exploitation"
+    
+  # Reconnaissance
+  - name: "Whois"
+    command: "whois {target}"
+    description: "Domain registration information"
+    category: "Reconnaissance"
+    
+  - name: "TheHarvester"
+    command: "theHarvester -d {target} -b all"
+    description: "Email, subdomain, and name harvesting"
+    category: "Reconnaissance"
+    
+  - name: "Sublist3r"
+    command: "sublist3r -d {target}"
+    description: "Subdomain enumeration"
+    category: "Reconnaissance"
+    
+  # Basic Network Tools
+  - name: "Ping"
+    command: "ping -c 4 {target}"
+    description: "Send ICMP echo requests"
+    category: "Network Tools"
+    
+  - name: "Traceroute"
+    command: "traceroute {target}"
+    description: "Trace network path to target"
+    category: "Network Tools"
+    
+  - name: "Netcat - Listen"
+    command: "nc -lvnp {port}"
+    description: "Listen on specified port"
+    category: "Network Tools"
+    
+  - name: "Netcat - Connect"
+    command: "nc {target} {port}"
+    description: "Connect to target on specified port"
+    category: "Network Tools"
+    
+  # Password Attacks
+  - name: "Hydra - SSH"
+    command: "hydra -l username -P /usr/share/wordlists/rockyou.txt ssh://{target}"
+    description: "SSH password brute force"
+    category: "Password Attacks"
+    
+  - name: "Hydra - FTP"
+    command: "hydra -l username -P /usr/share/wordlists/rockyou.txt ftp://{target}"
+    description: "FTP password brute force"
+    category: "Password Attacks"
+
+  - name: "Whoami"
+    command: "whoami"
+    description: "Display current user"
+    category: "System Information"

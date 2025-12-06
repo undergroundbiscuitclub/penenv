@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PenEnv
+Comment=Pentesting Environment with integrated shells and note-taking
+Exec=penenv
+Icon=penenv
+Terminal=false
+Categories=Development;Utility;Security;
+Keywords=pentesting;security;terminal;hacking;
+StartupNotify=true
