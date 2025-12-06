@@ -328,6 +328,43 @@ cargo build
 cargo run
 ```
 
+## ⚠️ Important Disclaimers
+
+**EDUCATIONAL USE ONLY**: This software is provided for educational purposes and authorized security testing only. Users are solely responsible for ensuring they have explicit permission to test any systems or networks.
+
+**AUTHORIZED USE ONLY**: Only use this tool against systems you own or have written permission to test. Unauthorized access to computer systems is illegal under laws including the Computer Fraud and Abuse Act (CFAA) and similar legislation worldwide.
+
+**NO WARRANTY**: This software is provided "as is" without warranty of any kind. It may contain bugs, errors, or security issues. The authors accept no liability for any damage, data loss, or legal consequences resulting from its use.
+
+**USE AT YOUR OWN RISK**: By using this software, you acknowledge that you understand the risks and accept full responsibility for your actions.
+
+## 📜 Credits and Acknowledgments
+
+This project is built on the shoulders of giants. We gratefully acknowledge:
+
+**Core Libraries and Frameworks:**
+- [GTK4](https://www.gtk.org/) - GNOME's modern UI toolkit (LGPL-2.1)
+- [libadwaita](https://gnome.pages.gitlab.gnome.org/libadwaita/) - GNOME's design library (LGPL-2.1)
+- [VTE](https://gitlab.gnome.org/GNOME/vte) - Virtual Terminal Emulator (LGPL-2.1)
+- [Rust](https://www.rust-lang.org/) - Systems programming language (MIT/Apache-2.0)
+
+**Rust Crates:**
+- [gtk4-rs](https://gtk-rs.org/) - Rust bindings for GTK4
+- [libadwaita-rs](https://world.pages.gitlab.gnome.org/Rust/libadwaita-rs/) - Rust bindings for libadwaita
+- [vte4-rs](https://github.com/gtk-rs/gtk4-rs) - Rust bindings for VTE4
+- [ropey](https://github.com/cessen/ropey) - Text rope library by Nathan Vegdahl
+- [chrono](https://github.com/chronotope/chrono) - Date and time library
+- [serde](https://serde.rs/) - Serialization framework
+- [serde_yaml](https://github.com/dtolnay/serde-yaml) - YAML support for Serde
+- [sysinfo](https://github.com/GuillaumeGomez/sysinfo) - System information library
+
+**Referenced Tools in Command Templates:**
+
+The built-in command templates reference common security testing tools. These tools are **NOT** included with PenEnv and must be installed separately. All credit goes to their respective authors.
+
+All command-line tools referenced in PenEnv remain the property of their respective authors and are subject to their own licenses.
+
+---
 
 ## Distribution
 
@@ -341,12 +378,23 @@ All packages handle dependencies automatically and integrate with your desktop e
 
 ## License
 
-MIT
+MIT License - See LICENSE file for details.
+
+**Important**: This license applies only to PenEnv itself. All third-party libraries, frameworks, and tools referenced by PenEnv are subject to their own respective licenses. Users are responsible for complying with all applicable licenses.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! This is an educational project, and we encourage learning and improvement. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**By contributing, you agree that:**
+- Your contributions will be licensed under the MIT License
+- You understand the educational nature of this project
+- You promote responsible and legal use of security tools
 
 ## Author
 
 Created by undergroundbiscuitclub
+
+## Security and Responsible Disclosure
+
+If you discover a security vulnerability in PenEnv itself (not in referenced third-party tools), please report it responsibly by opening a GitHub issue or contacting the maintainer directly. Do not use discovered vulnerabilities maliciously.
