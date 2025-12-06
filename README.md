@@ -2,6 +2,8 @@
 
 A modern GTK4 desktop application for managing penetration testing environments with integrated shells, note-taking, and target management.
 
+![Sreenshot of Application](images/screenshot.png)
+
 ## Features
 
 - **Tabbed Interface**: Multiple tabs for easy navigation

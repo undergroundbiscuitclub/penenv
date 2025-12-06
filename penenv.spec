@@ -39,8 +39,8 @@ mkdir -p $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/scalable/apps
 
 install -m 755 target/release/penenv $RPM_BUILD_ROOT%{_bindir}/penenv
 install -m 644 penenv.desktop $RPM_BUILD_ROOT%{_datadir}/applications/penenv.desktop
-install -m 644 penenv-icon.png $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/256x256/apps/penenv.png
-install -m 644 penenv-icon.svg $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/scalable/apps/penenv.svg
+install -m 644 images/penenv-icon.png $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/256x256/apps/penenv.png
+install -m 644 images/penenv-icon.svg $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/scalable/apps/penenv.svg
 
 %files
 %license LICENSE

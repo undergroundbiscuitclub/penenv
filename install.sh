@@ -22,8 +22,8 @@ cp target/release/penenv ~/.local/bin/
 
 # Copy icon
 echo "Installing icon..."
-cp penenv-icon.png ~/.local/share/icons/hicolor/256x256/apps/penenv.png
-cp penenv-icon.svg ~/.local/share/icons/hicolor/scalable/apps/penenv.svg
+cp images/penenv-icon.png ~/.local/share/icons/hicolor/256x256/apps/penenv.png
+cp images/penenv-icon.svg ~/.local/share/icons/hicolor/scalable/apps/penenv.svg
 
 # Copy desktop file
 echo "Installing desktop file..."

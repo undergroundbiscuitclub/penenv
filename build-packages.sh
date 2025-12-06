@@ -62,8 +62,8 @@ build_deb() {
     # Copy files
     cp target/release/penenv "$PKG_DIR/usr/bin/"
     cp penenv.desktop "$PKG_DIR/usr/share/applications/"
-    cp penenv-icon.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/penenv.png"
-    cp penenv-icon.svg "$PKG_DIR/usr/share/icons/hicolor/scalable/apps/penenv.svg"
+    cp images/penenv-icon.png "$PKG_DIR/usr/share/icons/hicolor/256x256/apps/penenv.png"
+    cp images/penenv-icon.svg "$PKG_DIR/usr/share/icons/hicolor/scalable/apps/penenv.svg"
     cp README.md "$PKG_DIR/usr/share/doc/penenv/"
     cp LICENSE "$PKG_DIR/usr/share/doc/penenv/"
     
@@ -139,13 +139,13 @@ build_rpm() {
     
     # Copy RPM to local directory
     mkdir -p target/rpm
-    cp ~/rpmbuild/RPMS/x86_64/penenv-*.rpm target/rpm/ 2>/dev/null || \
-    cp ~/rpmbuild/RPMS/aarch64/penenv-*.rpm target/rpm/ 2>/dev/null || true
+    cp ~/rpmbuild/RPMS/x86_64/penenv-${VERSION}-*.rpm target/rpm/ 2>/dev/null || \
+    cp ~/rpmbuild/RPMS/aarch64/penenv-${VERSION}-*.rpm target/rpm/ 2>/dev/null || true
     
-    if ls target/rpm/penenv-*.rpm 1> /dev/null 2>&1; then
-        echo "✅ RPM package created in target/rpm/"
+    if ls target/rpm/penenv-${VERSION}-*.rpm 1> /dev/null 2>&1; then
+        echo "✅ RPM package created: target/rpm/penenv-${VERSION}-*.rpm"
         echo ""
-        echo "Install with: sudo dnf install target/rpm/penenv-*.rpm"
+        echo "Install with: sudo dnf install target/rpm/penenv-${VERSION}-*.rpm"
     else
         echo "❌ RPM build may have failed. Check ~/rpmbuild/RPMS/"
     fi
