@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+
+# PenEnv generated files (optional - remove if you want to track them)
+targets.txt
+notes.md
+commands.log
+project_idea.md
+
+# Package build artifacts
+/debian/.debhelper/
+/debian/penenv/
+/debian/files
+/debian/*.debhelper
+/debian/*.debhelper.log
+/debian/*.substvars
+*.deb
+*.rpm
+*.tar.gz
+/target/rpm/
+/target/debian/
+
+# OS
+.DS_Store
+Thumbs.db
+
