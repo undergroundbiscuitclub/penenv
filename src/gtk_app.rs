@@ -20,6 +20,7 @@ use std::fs;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::path::PathBuf;
+use chrono;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Networks};
 
@@ -40,6 +41,9 @@ struct CommandsConfig {
 struct KeyboardShortcuts {
     toggle_drawer: String,
     insert_target: String,
+    insert_timestamp: String,
+    new_shell: Option<String>,
+    new_split: Option<String>,
 }
 
 impl Default for KeyboardShortcuts {
@@ -47,6 +51,9 @@ impl Default for KeyboardShortcuts {
         Self {
             toggle_drawer: "grave".to_string(),  // ` key
             insert_target: "t".to_string(),
+            insert_timestamp: "T".to_string(),  // Shift+T
+            new_shell: Some("N".to_string()),  // Shift+N
+            new_split: Some("S".to_string()),  // Shift+S
         }
     }
 }
@@ -100,6 +107,9 @@ thread_local! {
         keyboard_shortcuts: KeyboardShortcuts {
             toggle_drawer: "grave".to_string(),
             insert_target: "t".to_string(),
+            insert_timestamp: "T".to_string(),
+            new_shell: Some("N".to_string()),
+            new_split: Some("S".to_string()),
         },
         enable_command_logging: true,
     });
@@ -124,8 +134,8 @@ fn get_file_path(filename: &str) -> PathBuf {
     path
 }
 
-/// Gets the custom commands config file path in user's config directory
-fn get_custom_commands_path() -> PathBuf {
+/// Gets the penenv config directory, creating it if it doesn't exist
+fn get_config_dir() -> PathBuf {
     let mut path = if let Some(config_dir) = glib::user_config_dir().to_str() {
         PathBuf::from(config_dir)
     } else {
@@ -133,19 +143,19 @@ fn get_custom_commands_path() -> PathBuf {
     };
     path.push("penenv");
     fs::create_dir_all(&path).ok();
+    path
+}
+
+/// Gets the custom commands config file path in user's config directory
+fn get_custom_commands_path() -> PathBuf {
+    let mut path = get_config_dir();
     path.push("custom_commands.yaml");
     path
 }
 
 /// Gets the settings config file path
 fn get_settings_config_path() -> PathBuf {
-    let mut path = if let Some(config_dir) = glib::user_config_dir().to_str() {
-        PathBuf::from(config_dir)
-    } else {
-        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".config")
-    };
-    path.push("penenv");
-    fs::create_dir_all(&path).ok();
+    let mut path = get_config_dir();
     path.push("settings.yaml");
     path
 }
@@ -437,19 +447,27 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         .transient_for(parent)
         .modal(true)
         .title("Settings")
-        .default_width(400)
-        .default_height(200)
+        .default_width(600)
+        .default_height(500)
         .build();
     
-    let dialog_box = GtkBox::new(Orientation::Vertical, 15);
-    dialog_box.set_margin_top(20);
-    dialog_box.set_margin_bottom(20);
-    dialog_box.set_margin_start(20);
-    dialog_box.set_margin_end(20);
+    let main_box = GtkBox::new(Orientation::Vertical, 0);
     
-    let title = Label::new(Some("Monitor Settings"));
-    title.add_css_class("title-2");
-    dialog_box.append(&title);
+    // Create notebook for tabs
+    let notebook = Notebook::builder()
+        .scrollable(false)
+        .build();
+    
+    // TAB 1: General Settings
+    let general_box = GtkBox::new(Orientation::Vertical, 15);
+    general_box.set_margin_top(20);
+    general_box.set_margin_bottom(20);
+    general_box.set_margin_start(20);
+    general_box.set_margin_end(20);
+    
+    let monitor_title = Label::new(Some("Monitor Settings"));
+    monitor_title.add_css_class("title-3");
+    general_box.append(&monitor_title);
     
     // CPU Monitor checkbox
     let cpu_check = CheckButton::with_label("Show CPU Monitor");
@@ -462,7 +480,7 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         settings.monitor_visibility.show_cpu = check.is_active();
         let _ = save_app_settings(&settings);
     });
-    dialog_box.append(&cpu_check);
+    general_box.append(&cpu_check);
     
     // RAM Monitor checkbox
     let ram_check = CheckButton::with_label("Show RAM Monitor");
@@ -475,7 +493,7 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         settings.monitor_visibility.show_ram = check.is_active();
         let _ = save_app_settings(&settings);
     });
-    dialog_box.append(&ram_check);
+    general_box.append(&ram_check);
     
     // Network Monitor checkbox
     let net_check = CheckButton::with_label("Show Network Monitor");
@@ -488,16 +506,16 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         settings.monitor_visibility.show_network = check.is_active();
         let _ = save_app_settings(&settings);
     });
-    dialog_box.append(&net_check);
+    general_box.append(&net_check);
     
     // Separator
     let separator = Separator::new(Orientation::Horizontal);
-    dialog_box.append(&separator);
+    general_box.append(&separator);
     
     // Command Logging section
     let logging_title = Label::new(Some("Command Logging"));
     logging_title.add_css_class("title-3");
-    dialog_box.append(&logging_title);
+    general_box.append(&logging_title);
     
     let logging_check = CheckButton::with_label("Enable Command Logging");
     logging_check.set_active(is_command_logging_enabled());
@@ -538,37 +556,25 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         msg_dialog.set_child(Some(&msg_box));
         msg_dialog.present();
     });
-    dialog_box.append(&logging_check);
+    general_box.append(&logging_check);
     
     let logging_info = Label::new(Some("When disabled, the Log tab will be hidden and commands will not be logged."));
     logging_info.set_wrap(true);
     logging_info.add_css_class("dim-label");
-    dialog_box.append(&logging_info);
+    general_box.append(&logging_info);
     
-    // Separator
-    let separator1_5 = Separator::new(Orientation::Horizontal);
-    dialog_box.append(&separator1_5);
+    notebook.append_page(&general_box, Some(&Label::new(Some("⚙️ General"))));
     
-    // Custom Commands section
-    let commands_title = Label::new(Some("Custom Commands"));
-    commands_title.add_css_class("title-3");
-    dialog_box.append(&commands_title);
+    // TAB 2: Keyboard Shortcuts
+    let shortcuts_box = GtkBox::new(Orientation::Vertical, 15);
+    shortcuts_box.set_margin_top(20);
+    shortcuts_box.set_margin_bottom(20);
+    shortcuts_box.set_margin_start(20);
+    shortcuts_box.set_margin_end(20);
     
-    let manage_commands_btn = Button::with_label("📝 Manage Custom Commands");
-    let parent_clone = parent.clone();
-    manage_commands_btn.connect_clicked(move |_| {
-        show_manage_commands_dialog(&parent_clone);
-    });
-    dialog_box.append(&manage_commands_btn);
-    
-    // Separator
-    let separator2 = Separator::new(Orientation::Horizontal);
-    dialog_box.append(&separator2);
-    
-    // Keyboard Shortcuts section
     let shortcuts_title = Label::new(Some("Keyboard Shortcuts"));
     shortcuts_title.add_css_class("title-3");
-    dialog_box.append(&shortcuts_title);
+    shortcuts_box.append(&shortcuts_title);
     
     let shortcuts = get_keyboard_shortcuts();
     
@@ -584,7 +590,7 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     drawer_entry.set_editable(false);
     drawer_box.append(&drawer_label);
     drawer_box.append(&drawer_entry);
-    dialog_box.append(&drawer_box);
+    shortcuts_box.append(&drawer_box);
     
     let change_drawer_btn = Button::with_label("Change");
     change_drawer_btn.add_css_class("flat");
@@ -594,6 +600,17 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
         show_key_capture_dialog(&parent_clone2, "Toggle Command Drawer", "toggle_drawer", &drawer_entry_clone);
     });
     drawer_box.append(&change_drawer_btn);
+    
+    let clear_drawer_btn = Button::with_label("Clear");
+    clear_drawer_btn.add_css_class("flat");
+    let drawer_entry_clone2 = drawer_entry.clone();
+    clear_drawer_btn.connect_clicked(move |_| {
+        let mut settings = get_app_settings();
+        settings.keyboard_shortcuts.toggle_drawer = String::new();
+        let _ = save_app_settings(&settings);
+        drawer_entry_clone2.set_text("Not assigned");
+    });
+    drawer_box.append(&clear_drawer_btn);
     
     // Insert target shortcut
     let target_box = GtkBox::new(Orientation::Horizontal, 10);
@@ -607,7 +624,7 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     target_entry.set_editable(false);
     target_box.append(&target_label);
     target_box.append(&target_entry);
-    dialog_box.append(&target_box);
+    shortcuts_box.append(&target_box);
     
     let change_target_btn = Button::with_label("Change");
     change_target_btn.add_css_class("flat");
@@ -618,18 +635,298 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     });
     target_box.append(&change_target_btn);
     
-    // Close button
-    let button_box = GtkBox::new(Orientation::Horizontal, 10);
-    button_box.set_halign(gtk::Align::End);
+    let clear_target_btn = Button::with_label("Clear");
+    clear_target_btn.add_css_class("flat");
+    let target_entry_clone2 = target_entry.clone();
+    clear_target_btn.connect_clicked(move |_| {
+        let mut settings = get_app_settings();
+        settings.keyboard_shortcuts.insert_target = String::new();
+        let _ = save_app_settings(&settings);
+        target_entry_clone2.set_text("Not assigned");
+    });
+    target_box.append(&clear_target_btn);
+    
+    // Insert timestamp shortcut
+    let timestamp_box = GtkBox::new(Orientation::Horizontal, 10);
+    timestamp_box.set_spacing(10);
+    let timestamp_label = Label::new(Some("Insert Timestamp:"));
+    timestamp_label.set_halign(gtk::Align::Start);
+    timestamp_label.set_hexpand(true);
+    let timestamp_entry = Entry::new();
+    timestamp_entry.set_text(&format!("Ctrl+Shift+{}", key_to_display(&shortcuts.insert_timestamp)));
+    timestamp_entry.set_width_chars(15);
+    timestamp_entry.set_editable(false);
+    timestamp_box.append(&timestamp_label);
+    timestamp_box.append(&timestamp_entry);
+    shortcuts_box.append(&timestamp_box);
+    
+    let change_timestamp_btn = Button::with_label("Change");
+    change_timestamp_btn.add_css_class("flat");
+    let parent_clone4 = parent.clone();
+    let timestamp_entry_clone = timestamp_entry.clone();
+    change_timestamp_btn.connect_clicked(move |_| {
+        show_key_capture_dialog(&parent_clone4, "Insert Timestamp", "insert_timestamp", &timestamp_entry_clone);
+    });
+    timestamp_box.append(&change_timestamp_btn);
+    
+    let clear_timestamp_btn = Button::with_label("Clear");
+    clear_timestamp_btn.add_css_class("flat");
+    let timestamp_entry_clone2 = timestamp_entry.clone();
+    clear_timestamp_btn.connect_clicked(move |_| {
+        let mut settings = get_app_settings();
+        settings.keyboard_shortcuts.insert_timestamp = String::new();
+        let _ = save_app_settings(&settings);
+        timestamp_entry_clone2.set_text("Not assigned");
+    });
+    timestamp_box.append(&clear_timestamp_btn);
+    
+    // New shell shortcut
+    let new_shell_box = GtkBox::new(Orientation::Horizontal, 10);
+    new_shell_box.set_spacing(10);
+    let new_shell_label = Label::new(Some("New Shell Tab:"));
+    new_shell_label.set_halign(gtk::Align::Start);
+    new_shell_label.set_hexpand(true);
+    let new_shell_entry = Entry::new();
+    if let Some(ref key) = shortcuts.new_shell {
+        new_shell_entry.set_text(&format!("Ctrl+Shift+{}", key_to_display(key)));
+    } else {
+        new_shell_entry.set_text("Not assigned");
+    }
+    new_shell_entry.set_width_chars(15);
+    new_shell_entry.set_editable(false);
+    new_shell_box.append(&new_shell_label);
+    new_shell_box.append(&new_shell_entry);
+    shortcuts_box.append(&new_shell_box);
+    
+    let change_new_shell_btn = Button::with_label("Change");
+    change_new_shell_btn.add_css_class("flat");
+    let parent_clone5 = parent.clone();
+    let new_shell_entry_clone = new_shell_entry.clone();
+    change_new_shell_btn.connect_clicked(move |_| {
+        show_key_capture_dialog(&parent_clone5, "New Shell Tab", "new_shell", &new_shell_entry_clone);
+    });
+    new_shell_box.append(&change_new_shell_btn);
+    
+    let clear_new_shell_btn = Button::with_label("Clear");
+    clear_new_shell_btn.add_css_class("flat");
+    let new_shell_entry_clone2 = new_shell_entry.clone();
+    clear_new_shell_btn.connect_clicked(move |_| {
+        let mut settings = get_app_settings();
+        settings.keyboard_shortcuts.new_shell = None;
+        let _ = save_app_settings(&settings);
+        new_shell_entry_clone2.set_text("Not assigned");
+    });
+    new_shell_box.append(&clear_new_shell_btn);
+    
+    // New split view shortcut
+    let new_split_box = GtkBox::new(Orientation::Horizontal, 10);
+    new_split_box.set_spacing(10);
+    let new_split_label = Label::new(Some("New Split View:"));
+    new_split_label.set_halign(gtk::Align::Start);
+    new_split_label.set_hexpand(true);
+    let new_split_entry = Entry::new();
+    if let Some(ref key) = shortcuts.new_split {
+        new_split_entry.set_text(&format!("Ctrl+Shift+{}", key_to_display(key)));
+    } else {
+        new_split_entry.set_text("Not assigned");
+    }
+    new_split_entry.set_width_chars(15);
+    new_split_entry.set_editable(false);
+    new_split_box.append(&new_split_label);
+    new_split_box.append(&new_split_entry);
+    shortcuts_box.append(&new_split_box);
+    
+    let change_new_split_btn = Button::with_label("Change");
+    change_new_split_btn.add_css_class("flat");
+    let parent_clone6 = parent.clone();
+    let new_split_entry_clone = new_split_entry.clone();
+    change_new_split_btn.connect_clicked(move |_| {
+        show_key_capture_dialog(&parent_clone6, "New Split View", "new_split", &new_split_entry_clone);
+    });
+    new_split_box.append(&change_new_split_btn);
+    
+    let clear_new_split_btn = Button::with_label("Clear");
+    clear_new_split_btn.add_css_class("flat");
+    let new_split_entry_clone2 = new_split_entry.clone();
+    clear_new_split_btn.connect_clicked(move |_| {
+        let mut settings = get_app_settings();
+        settings.keyboard_shortcuts.new_split = None;
+        let _ = save_app_settings(&settings);
+        new_split_entry_clone2.set_text("Not assigned");
+    });
+    new_split_box.append(&clear_new_split_btn);
+    
+    notebook.append_page(&shortcuts_box, Some(&Label::new(Some("⌨️ Shortcuts"))));
+    
+    // TAB 3: Custom Commands
+    let commands_box = GtkBox::new(Orientation::Vertical, 10);
+    commands_box.set_margin_top(20);
+    commands_box.set_margin_bottom(20);
+    commands_box.set_margin_start(20);
+    commands_box.set_margin_end(20);
+    
+    let commands_title = Label::new(Some("Custom Commands"));
+    commands_title.add_css_class("title-3");
+    commands_box.append(&commands_title);
+    
+    // Commands list
+    let scrolled = ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_min_content_height(250);
+    
+    let list_box = ListBox::new();
+    list_box.add_css_class("boxed-list");
+    
+    // Function to populate the command list
+    let populate_commands = {
+        let list_box = list_box.clone();
+        let parent = parent.clone();
+        let dialog = dialog.clone();
+        
+        move || {
+            // Clear existing rows
+            while let Some(row) = list_box.first_child() {
+                list_box.remove(&row);
+            }
+            
+            // Load and populate with current commands
+            let commands = load_custom_commands();
+            
+            if commands.is_empty() {
+                let empty_label = Label::new(Some("No custom commands yet. Click \"Add Command\" to create one."));
+                empty_label.add_css_class("dim-label");
+                empty_label.set_margin_top(20);
+                empty_label.set_margin_bottom(20);
+                list_box.append(&empty_label);
+            } else {
+                for (idx, cmd) in commands.iter().enumerate() {
+                    let row_box = GtkBox::new(Orientation::Horizontal, 10);
+                    row_box.set_margin_top(8);
+                    row_box.set_margin_bottom(8);
+                    row_box.set_margin_start(10);
+                    row_box.set_margin_end(10);
+                    
+                    // Command info
+                    let info_box = GtkBox::new(Orientation::Vertical, 2);
+                    info_box.set_hexpand(true);
+                    
+                    let name_label = Label::new(Some(&cmd.name));
+                    name_label.set_halign(gtk::Align::Start);
+                    name_label.add_css_class("heading");
+                    
+                    let cmd_label = Label::new(Some(&cmd.command));
+                    cmd_label.set_halign(gtk::Align::Start);
+                    cmd_label.add_css_class("dim-label");
+                    cmd_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    
+                    info_box.append(&name_label);
+                    info_box.append(&cmd_label);
+                    
+                    // Action buttons
+                    let btn_box = GtkBox::new(Orientation::Horizontal, 5);
+                    
+                    let edit_btn = Button::with_label("✏️ Edit");
+                    let delete_btn = Button::with_label("🗑️");
+                    delete_btn.add_css_class("destructive-action");
+                    
+                    // Edit handler - reopen settings to refresh
+                    let parent_clone = parent.clone();
+                    let dialog_clone = dialog.clone();
+                    let cmd_clone = cmd.clone();
+                    let cpu_frame_clone = cpu_frame.clone();
+                    let ram_frame_clone = ram_frame.clone();
+                    let net_frame_clone = net_frame.clone();
+                    edit_btn.connect_clicked(move |_| {
+                        let parent_ref = parent_clone.clone();
+                        let dialog_ref = dialog_clone.clone();
+                        let cpu_ref = cpu_frame_clone.clone();
+                        let ram_ref = ram_frame_clone.clone();
+                        let net_ref = net_frame_clone.clone();
+                        show_edit_command_dialog(&parent_clone, idx, cmd_clone.clone(), move || {
+                            // Close current dialog and reopen settings on commands tab
+                            dialog_ref.close();
+                            show_settings_dialog(&parent_ref, &cpu_ref, &ram_ref, &net_ref);
+                        });
+                    });
+                    
+                    // Delete handler - refresh the dialog
+                    let parent_clone2 = parent.clone();
+                    let dialog_clone2 = dialog.clone();
+                    let cpu_frame_clone2 = cpu_frame.clone();
+                    let ram_frame_clone2 = ram_frame.clone();
+                    let net_frame_clone2 = net_frame.clone();
+                    delete_btn.connect_clicked(move |_| {
+                        if let Err(e) = delete_custom_command(idx) {
+                            eprintln!("Failed to delete command: {}", e);
+                        } else {
+                            // Close and reopen settings on commands tab
+                            dialog_clone2.close();
+                            show_settings_dialog(&parent_clone2, &cpu_frame_clone2, &ram_frame_clone2, &net_frame_clone2);
+                        }
+                    });
+                    
+                    btn_box.append(&edit_btn);
+                    btn_box.append(&delete_btn);
+                    
+                    row_box.append(&info_box);
+                    row_box.append(&btn_box);
+                    
+                    list_box.append(&row_box);
+                }
+            }
+        }
+    };
+    
+    // Initial population
+    populate_commands();
+    
+    scrolled.set_child(Some(&list_box));
+    commands_box.append(&scrolled);
+    
+    // Add button for new command
+    let add_cmd_btn = Button::with_label("➕ Add Command");
+    add_cmd_btn.add_css_class("suggested-action");
+    let parent_clone_cmd = parent.clone();
+    let dialog_clone_cmd = dialog.clone();
+    let cpu_frame_clone_cmd = cpu_frame.clone();
+    let ram_frame_clone_cmd = ram_frame.clone();
+    let net_frame_clone_cmd = net_frame.clone();
+    add_cmd_btn.connect_clicked(move |_| {
+        let parent_ref = parent_clone_cmd.clone();
+        let dialog_ref = dialog_clone_cmd.clone();
+        let cpu_ref = cpu_frame_clone_cmd.clone();
+        let ram_ref = ram_frame_clone_cmd.clone();
+        let net_ref = net_frame_clone_cmd.clone();
+        show_add_command_dialog(&parent_clone_cmd, move || {
+            // Close and reopen settings on commands tab
+            dialog_ref.close();
+            show_settings_dialog(&parent_ref, &cpu_ref, &ram_ref, &net_ref);
+        });
+    });
+    commands_box.append(&add_cmd_btn);
+    
+    notebook.append_page(&commands_box, Some(&Label::new(Some("📝 Commands"))));
+    
+    // Add notebook to main box
+    main_box.append(&notebook);
+    
+    // Close button at bottom
+    let bottom_box = GtkBox::new(Orientation::Horizontal, 10);
+    bottom_box.set_margin_top(10);
+    bottom_box.set_margin_bottom(10);
+    bottom_box.set_margin_start(20);
+    bottom_box.set_margin_end(20);
+    bottom_box.set_halign(gtk::Align::End);
+    bottom_box.set_halign(gtk::Align::End);
     let close_btn = Button::with_label("Close");
     let dialog_clone = dialog.clone();
     close_btn.connect_clicked(move |_| {
         dialog_clone.close();
     });
-    button_box.append(&close_btn);
-    dialog_box.append(&button_box);
+    bottom_box.append(&close_btn);
+    main_box.append(&bottom_box);
     
-    dialog.set_child(Some(&dialog_box));
+    dialog.set_child(Some(&main_box));
     dialog.present();
 }
 
@@ -660,7 +957,8 @@ fn show_key_capture_dialog(parent: &ApplicationWindow, label: &str, shortcut_nam
     dialog_box.set_margin_start(20);
     dialog_box.set_margin_end(20);
     
-    let info = Label::new(Some(&format!("Press Ctrl + any key for '{}'", label)));
+    let info = Label::new(Some(&format!("Press Ctrl{} + any key for '{}'", 
+        if label.contains("Timestamp") || label.contains("Shell") || label.contains("Split") { "+Shift" } else { "" }, label)));
     info.set_wrap(true);
     dialog_box.append(&info);
     
@@ -688,20 +986,29 @@ fn show_key_capture_dialog(parent: &ApplicationWindow, label: &str, shortcut_nam
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             let key_name = keyval.name().unwrap_or_default().to_string();
+            let has_shift = modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK);
             
             // Update the display
-            current_key_clone.set_text(&format!("Ctrl+{}", key_to_display(&key_name)));
+            let display_text = if has_shift {
+                format!("Ctrl+Shift+{}", key_to_display(&key_name))
+            } else {
+                format!("Ctrl+{}", key_to_display(&key_name))
+            };
+            current_key_clone.set_text(&display_text);
             
             // Save the shortcut to settings
             let mut settings = get_app_settings();
             match shortcut_name.as_str() {
                 "toggle_drawer" => settings.keyboard_shortcuts.toggle_drawer = key_name.clone(),
                 "insert_target" => settings.keyboard_shortcuts.insert_target = key_name.clone(),
+                "insert_timestamp" => settings.keyboard_shortcuts.insert_timestamp = key_name.clone(),
+                "new_shell" => settings.keyboard_shortcuts.new_shell = Some(key_name.clone()),
+                "new_split" => settings.keyboard_shortcuts.new_split = Some(key_name.clone()),
                 _ => {}
             }
             
             if save_app_settings(&settings).is_ok() {
-                display_entry.set_text(&format!("Ctrl+{}", key_to_display(&key_name)));
+                display_entry.set_text(&display_text);
                 
                 // Close dialog after a short delay
                 glib::timeout_add_local_once(std::time::Duration::from_millis(500), {
@@ -719,155 +1026,6 @@ fn show_key_capture_dialog(parent: &ApplicationWindow, label: &str, shortcut_nam
     
     dialog.add_controller(key_controller);
     dialog.set_child(Some(&dialog_box));
-    dialog.present();
-}
-
-fn show_manage_commands_dialog(parent: &ApplicationWindow) {
-    let dialog = gtk::Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .title("Manage Custom Commands")
-        .default_width(600)
-        .default_height(500)
-        .build();
-    
-    let main_box = GtkBox::new(Orientation::Vertical, 10);
-    main_box.set_margin_top(20);
-    main_box.set_margin_bottom(20);
-    main_box.set_margin_start(20);
-    main_box.set_margin_end(20);
-    
-    let title = Label::new(Some("Custom Commands"));
-    title.add_css_class("title-2");
-    main_box.append(&title);
-    
-    // Commands list
-    let scrolled = ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_min_content_height(300);
-    
-    let list_box = ListBox::new();
-    list_box.add_css_class("boxed-list");
-    
-    // Function to populate the list
-    let populate_list = {
-        let list_box = list_box.clone();
-        let parent = parent.clone();
-        let dialog = dialog.clone();
-        
-        move || {
-            // Clear existing rows
-            while let Some(row) = list_box.first_child() {
-                list_box.remove(&row);
-            }
-            
-            // Load and populate with current commands
-            let commands = load_custom_commands();
-            
-            for (idx, cmd) in commands.iter().enumerate() {
-                let row_box = GtkBox::new(Orientation::Horizontal, 10);
-                row_box.set_margin_top(8);
-                row_box.set_margin_bottom(8);
-                row_box.set_margin_start(10);
-                row_box.set_margin_end(10);
-                
-                // Command info
-                let info_box = GtkBox::new(Orientation::Vertical, 2);
-                info_box.set_hexpand(true);
-                
-                let name_label = Label::new(Some(&cmd.name));
-                name_label.set_halign(gtk::Align::Start);
-                name_label.add_css_class("heading");
-                
-                let cmd_label = Label::new(Some(&cmd.command));
-                cmd_label.set_halign(gtk::Align::Start);
-                cmd_label.add_css_class("dim-label");
-                cmd_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                
-                info_box.append(&name_label);
-                info_box.append(&cmd_label);
-                
-                // Action buttons
-                let btn_box = GtkBox::new(Orientation::Horizontal, 5);
-                
-                let edit_btn = Button::with_label("✏️ Edit");
-                let delete_btn = Button::with_label("🗑️ Delete");
-                delete_btn.add_css_class("destructive-action");
-                
-                // Edit handler - reopen this dialog after closing
-                let parent_clone = parent.clone();
-                let dialog_clone = dialog.clone();
-                let cmd_clone = cmd.clone();
-                edit_btn.connect_clicked(move |_| {
-                    let parent_ref = parent_clone.clone();
-                    let dialog_ref = dialog_clone.clone();
-                    show_edit_command_dialog(&parent_clone, idx, cmd_clone.clone(), move || {
-                        // Close current dialog and reopen to refresh
-                        dialog_ref.close();
-                        show_manage_commands_dialog(&parent_ref);
-                    });
-                });
-                
-                // Delete handler - reopen dialog after deletion
-                let parent_clone2 = parent.clone();
-                let dialog_clone2 = dialog.clone();
-                delete_btn.connect_clicked(move |_| {
-                    if let Err(e) = delete_custom_command(idx) {
-                        eprintln!("Failed to delete command: {}", e);
-                    } else {
-                        println!("Command deleted successfully");
-                        // Close and reopen dialog to refresh
-                        dialog_clone2.close();
-                        show_manage_commands_dialog(&parent_clone2);
-                    }
-                });
-                
-                btn_box.append(&edit_btn);
-                btn_box.append(&delete_btn);
-                
-                row_box.append(&info_box);
-                row_box.append(&btn_box);
-                
-                list_box.append(&row_box);
-            }
-        }
-    };
-    
-    // Initial population
-    populate_list();
-    
-    scrolled.set_child(Some(&list_box));
-    main_box.append(&scrolled);
-    
-    // Buttons
-    let button_box = GtkBox::new(Orientation::Horizontal, 10);
-    button_box.set_halign(gtk::Align::End);
-    
-    let add_btn = Button::with_label("➕ Add New Command");
-    add_btn.add_css_class("suggested-action");
-    let parent_clone = parent.clone();
-    let dialog_clone = dialog.clone();
-    add_btn.connect_clicked(move |_| {
-        let parent_ref = parent_clone.clone();
-        let dialog_ref = dialog_clone.clone();
-        show_add_command_dialog(&parent_clone, move || {
-            // Close and reopen to refresh
-            dialog_ref.close();
-            show_manage_commands_dialog(&parent_ref);
-        });
-    });
-    
-    let close_btn = Button::with_label("Close");
-    let dialog_clone2 = dialog.clone();
-    close_btn.connect_clicked(move |_| {
-        dialog_clone2.close();
-    });
-    
-    button_box.append(&add_btn);
-    button_box.append(&close_btn);
-    main_box.append(&button_box);
-    
-    dialog.set_child(Some(&main_box));
     dialog.present();
 }
 
@@ -964,7 +1122,6 @@ where
         
         match save_custom_command(cmd_template) {
             Ok(_) => {
-                println!("Custom command '{}' saved successfully", name);
                 on_save();
                 dialog_clone2.close();
             }
@@ -1079,7 +1236,6 @@ where
         
         match update_custom_command(index, cmd_template) {
             Ok(_) => {
-                println!("Custom command '{}' updated successfully", name);
                 on_save();
                 dialog_clone2.close();
             }
@@ -1118,6 +1274,9 @@ fn create_main_window(app: &Application) {
         .scrollable(true)
         .build();
 
+    // Shell counter for tracking shell tab numbers
+    let shell_counter: Rc<RefCell<usize>> = Rc::new(RefCell::new(5));
+
     // Tab 1: Targets
     let targets_page = create_text_editor(&get_file_path("targets.txt").to_string_lossy().to_string(), Some(notebook.clone()));
     notebook.append_page(&targets_page, Some(&Label::new(Some("📋 Targets"))));
@@ -1133,7 +1292,7 @@ fn create_main_window(app: &Application) {
     }
 
     // Tab 4 (or 3 if no log): First Shell
-    let shell_page = create_shell_tab(4, notebook.clone());
+    let shell_page = create_shell_tab(4, notebook.clone(), Some(shell_counter.clone()));
     let shell_label = create_editable_tab_label("💻 Shell 4", &notebook);
     notebook.append_page(&shell_page, Some(&shell_label));
 
@@ -1213,25 +1372,15 @@ fn create_main_window(app: &Application) {
     monitors_box.append(&net_frame);
     
     let notebook_clone = notebook.clone();
-    let shell_counter = Rc::new(RefCell::new(5));
     let shell_counter_clone = Rc::clone(&shell_counter);
     new_shell_btn.connect_clicked(move |_| {
-        let mut counter = shell_counter_clone.borrow_mut();
-        let shell_page = create_shell_tab(*counter, notebook_clone.clone());
-        let shell_label = create_editable_tab_label(&format!("💻 Shell {}", *counter), &notebook_clone);
-        notebook_clone.append_page(&shell_page, Some(&shell_label));
-        notebook_clone.set_current_page(Some(notebook_clone.n_pages() - 1));
-        *counter += 1;
+        create_new_shell_tab(&notebook_clone, &shell_counter_clone);
     });
 
     let notebook_clone2 = notebook.clone();
     let shell_counter_clone2 = Rc::clone(&shell_counter);
     split_mode_btn.connect_clicked(move |_| {
-        let counter = shell_counter_clone2.borrow_mut();
-        let split_page = create_split_view_tab(*counter, notebook_clone2.clone());
-        let split_label = create_editable_tab_label("📝💻 Split View", &notebook_clone2);
-        notebook_clone2.append_page(&split_page, Some(&split_label));
-        notebook_clone2.set_current_page(Some(notebook_clone2.n_pages() - 1));
+        create_new_split_view_tab(&notebook_clone2, &shell_counter_clone2);
     });
 
     let notebook_clone3 = notebook.clone();
@@ -1370,10 +1519,36 @@ fn create_main_window(app: &Application) {
     main_box.append(&status_box);
 
     // Add global keyboard shortcuts for switching tabs (Ctrl+1 through Ctrl+9)
+    // and creating new tabs (Ctrl+Shift+N for shell, Ctrl+Shift+S for split)
     let key_controller = gtk::EventControllerKey::new();
     let notebook_clone = notebook.clone();
+    let new_shell_btn_clone = new_shell_btn.clone();
+    let split_mode_btn_clone = split_mode_btn.clone();
+    
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            let shortcuts = get_keyboard_shortcuts();
+            let key_name = keyval.name().unwrap_or_default().to_string();
+            
+            // Check for Ctrl+Shift combinations for new tab creation
+            if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
+                // New shell shortcut
+                if let Some(ref new_shell_key) = shortcuts.new_shell {
+                    if &key_name == new_shell_key {
+                        new_shell_btn_clone.emit_clicked();
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+                
+                // New split view shortcut
+                if let Some(ref new_split_key) = shortcuts.new_split {
+                    if &key_name == new_split_key {
+                        split_mode_btn_clone.emit_clicked();
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+            }
+            
             // Map Ctrl+1 through Ctrl+9 to tabs 0-8
             let page_num = match keyval {
                 gtk::gdk::Key::_1 => Some(0),
@@ -1604,6 +1779,7 @@ fn create_text_editor(file_path: &str, notebook: Option<Notebook>) -> GtkBox {
     let text_view_clone2 = text_view.clone();
     let notebook_clone2 = notebook.clone();
     let text_view_clone3 = text_view.clone();
+    let text_view_clone4 = text_view.clone();
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             if keyval == gtk::gdk::Key::s {
@@ -1628,6 +1804,14 @@ fn create_text_editor(file_path: &str, notebook: Option<Notebook>) -> GtkBox {
             let key_name = keyval.name().unwrap_or_default().to_string();
             if key_name == shortcuts.insert_target {
                 show_target_selector_for_textview(&text_view_clone3);
+                return gtk::glib::Propagation::Stop;
+            }
+            
+            // Check for Ctrl+Shift+T (timestamp insertion)
+            if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) && key_name == shortcuts.insert_timestamp {
+                let timestamp = chrono::Local::now().format("[%Y-%m-%d %H:%M:%S] ").to_string();
+                let buffer = text_view_clone4.buffer();
+                buffer.insert_at_cursor(&timestamp);
                 return gtk::glib::Propagation::Stop;
             }
         }
@@ -1695,7 +1879,7 @@ fn create_readonly_viewer(file_path: &str) -> GtkBox {
     container
 }
 
-fn create_split_view_tab(_shell_id: usize, notebook: Notebook) -> Paned {
+fn create_split_view_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<Rc<RefCell<usize>>>) -> Paned {
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_margin_top(5);
     paned.set_margin_bottom(5);
@@ -1780,6 +1964,7 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook) -> Paned {
     let notes_path_clone3 = notes_path.clone();
     let notes_view_clone3 = notes_view.clone();
     let notes_view_clone4 = notes_view.clone();
+    let notes_view_clone5 = notes_view.clone();
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             if keyval == gtk::gdk::Key::s {
@@ -1799,6 +1984,14 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook) -> Paned {
                 show_target_selector_for_textview(&notes_view_clone4);
                 return gtk::glib::Propagation::Stop;
             }
+            
+            // Check for Ctrl+Shift+T (timestamp insertion)
+            if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) && key_name == shortcuts.insert_timestamp {
+                let timestamp = chrono::Local::now().format("[%Y-%m-%d %H:%M:%S] ").to_string();
+                let buffer = notes_view_clone5.buffer();
+                buffer.insert_at_cursor(&timestamp);
+                return gtk::glib::Propagation::Stop;
+            }
         }
         gtk::glib::Propagation::Proceed
     });
@@ -1808,7 +2001,7 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook) -> Paned {
     notes_container.append(&button_box);
     
     // Right side: Shell tab
-    let shell_container = create_shell_tab(_shell_id, notebook);
+    let shell_container = create_shell_tab(_shell_id, notebook, shell_counter);
     
     paned.set_start_child(Some(&notes_container));
     paned.set_end_child(Some(&shell_container));
@@ -1821,7 +2014,28 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook) -> Paned {
     paned
 }
 
-fn create_shell_tab(_shell_id: usize, notebook: Notebook) -> GtkBox {
+// Helper function to create a new shell tab (callable from anywhere including terminal keyboard handler)
+fn create_new_shell_tab(notebook: &Notebook, shell_counter: &Rc<RefCell<usize>>) {
+    let mut counter = shell_counter.borrow_mut();
+    let shell_page = create_shell_tab(*counter, notebook.clone(), Some(Rc::clone(shell_counter)));
+    let shell_label = create_editable_tab_label(&format!("💻 Shell {}", *counter), notebook);
+    let page_num = notebook.append_page(&shell_page, Some(&shell_label));
+    notebook.set_current_page(Some(page_num));
+    focus_terminal_in_page(&shell_page.upcast_ref::<gtk::Widget>());
+    *counter += 1;
+}
+
+// Helper function to create a new split view tab (callable from anywhere including terminal keyboard handler)
+fn create_new_split_view_tab(notebook: &Notebook, shell_counter: &Rc<RefCell<usize>>) {
+    let counter = shell_counter.borrow();
+    let split_page = create_split_view_tab(*counter, notebook.clone(), Some(Rc::clone(shell_counter)));
+    let split_label = create_editable_tab_label("📝💻 Split View", notebook);
+    let page_num = notebook.append_page(&split_page, Some(&split_label));
+    notebook.set_current_page(Some(page_num));
+    focus_terminal_in_split_view(&split_page.upcast_ref::<gtk::Widget>());
+}
+
+fn create_shell_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<Rc<RefCell<usize>>>) -> GtkBox {
     let outer_container = GtkBox::new(Orientation::Vertical, 5);
     outer_container.set_margin_top(5);
     outer_container.set_margin_bottom(5);
@@ -1857,35 +2071,28 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook) -> GtkBox {
     let terminal = Terminal::new();
     terminal.set_vexpand(true);
     
-    // Spawn bash in the terminal with command logging via PROMPT_COMMAND (if enabled)
-    let env_vars = if is_command_logging_enabled() {
+    // Build base environment variables for shell
+    let mut env_vars = vec![
+        format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
+        format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "user".to_string())),
+        format!("PATH={}", std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string())),
+        format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
+        format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
+    ];
+    
+    // Add command logging via PROMPT_COMMAND if enabled
+    if is_command_logging_enabled() {
         let log_file = get_file_path("commands.log").to_string_lossy().to_string();
         
         // Set up bash to log commands after execution using PROMPT_COMMAND
         // This captures only completed commands from history, not keystrokes or passwords
+        // Initialize __penenv_prev_cmd only if it's not set (first run) to prevent logging old commands
         let prompt_cmd = format!(
-            r#"history -a; __penenv_last_cmd=$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//'); if [ -n "$__penenv_last_cmd" ] && [ "$__penenv_last_cmd" != "$__penenv_prev_cmd" ]; then echo "[$(date '+%Y-%m-%d %H:%M:%S')] $__penenv_last_cmd" >> '{}'; __penenv_prev_cmd="$__penenv_last_cmd"; fi"#,
+            r#"history -a; __penenv_last_cmd=$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//'); if [ -z "$__penenv_prev_cmd" ]; then __penenv_prev_cmd="$__penenv_last_cmd"; fi; if [ -n "$__penenv_last_cmd" ] && [ "$__penenv_last_cmd" != "$__penenv_prev_cmd" ]; then echo "[$(date '+%Y-%m-%d %H:%M:%S')] $__penenv_last_cmd" >> '{}'; __penenv_prev_cmd="$__penenv_last_cmd"; fi"#,
             log_file
         );
-        
-        vec![
-            format!("PROMPT_COMMAND={}", prompt_cmd),
-            format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
-            format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "user".to_string())),
-            format!("PATH={}", std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string())),
-            format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
-            format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
-        ]
-    } else {
-        // Logging disabled - just pass through essential environment variables
-        vec![
-            format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
-            format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "user".to_string())),
-            format!("PATH={}", std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string())),
-            format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
-            format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
-        ]
-    };
+        env_vars.insert(0, format!("PROMPT_COMMAND={}", prompt_cmd));
+    }
     
     let env_refs: Vec<&str> = env_vars.iter().map(|s| s.as_str()).collect();
     
@@ -1960,10 +2167,33 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook) -> GtkBox {
     let notebook_clone2 = notebook.clone();
     let drawer_toggle_clone2 = drawer_toggle.clone();
     let search_entry_clone = search_entry.clone();
+    let shell_counter_clone3 = shell_counter.clone();
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             let shortcuts = get_keyboard_shortcuts();
             let key_name = keyval.name().unwrap_or_default().to_string();
+            
+            // Check for Ctrl+Shift combinations first (new shell/split shortcuts)
+            if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
+                // Handle new shell shortcut
+                if let Some(ref new_shell_key) = shortcuts.new_shell {
+                    if &key_name == new_shell_key {
+                        if let Some(ref counter) = shell_counter_clone3 {
+                            create_new_shell_tab(&notebook_clone2, counter);
+                        }
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+                // Handle new split view shortcut
+                if let Some(ref new_split_key) = shortcuts.new_split {
+                    if &key_name == new_split_key {
+                        if let Some(ref counter) = shell_counter_clone3 {
+                            create_new_split_view_tab(&notebook_clone2, counter);
+                        }
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+            }
             
             // Toggle command drawer shortcut
             if key_name == shortcuts.toggle_drawer {
@@ -2700,6 +2930,39 @@ fn show_target_selector_for_textview(text_view: &TextView) {
     
     popup.set_child(Some(&popup_box));
     popup.present();
+}
+
+/// Focus the terminal in a shell tab page
+fn focus_terminal_in_page(page: &gtk::Widget) {
+    // Shell page structure: GtkBox -> ... -> Paned -> GtkBox (terminal_container) -> Terminal
+    if let Some(outer_box) = page.downcast_ref::<GtkBox>() {
+        // Skip target_box, go to paned
+        if let Some(mut child) = outer_box.first_child() {
+            child = child.next_sibling().unwrap_or(child); // Skip target_box
+            if let Some(paned) = child.downcast_ref::<Paned>() {
+                if let Some(start_child) = paned.start_child() {
+                    if let Some(terminal_container) = start_child.downcast_ref::<GtkBox>() {
+                        if let Some(terminal_widget) = terminal_container.first_child() {
+                            if let Some(terminal) = terminal_widget.downcast_ref::<Terminal>() {
+                                terminal.grab_focus();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Focus the terminal in a split view page
+fn focus_terminal_in_split_view(page: &gtk::Widget) {
+    // Split view structure: Paned -> end_child (shell container) -> ... -> Terminal
+    if let Some(paned) = page.downcast_ref::<Paned>() {
+        if let Some(end_child) = paned.end_child() {
+            // The end_child is the shell container, use the same logic as focus_terminal_in_page
+            focus_terminal_in_page(&end_child);
+        }
+    }
 }
 
 fn reload_targets_in_shells(notebook: &Notebook) {
