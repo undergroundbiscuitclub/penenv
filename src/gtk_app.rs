@@ -20,7 +20,6 @@ use std::fs;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::path::PathBuf;
-use chrono::Local;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Networks};
 
@@ -56,6 +55,7 @@ impl Default for KeyboardShortcuts {
 struct AppSettings {
     monitor_visibility: MonitorVisibility,
     keyboard_shortcuts: KeyboardShortcuts,
+    enable_command_logging: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -80,6 +80,7 @@ impl Default for AppSettings {
         Self {
             monitor_visibility: MonitorVisibility::default(),
             keyboard_shortcuts: KeyboardShortcuts::default(),
+            enable_command_logging: true,
         }
     }
 }
@@ -100,6 +101,7 @@ thread_local! {
             toggle_drawer: "grave".to_string(),
             insert_target: "t".to_string(),
         },
+        enable_command_logging: true,
     });
 }
 
@@ -185,6 +187,11 @@ fn get_app_settings() -> AppSettings {
 /// Gets the current keyboard shortcuts
 fn get_keyboard_shortcuts() -> KeyboardShortcuts {
     APP_SETTINGS.with(|s| s.borrow().keyboard_shortcuts.clone())
+}
+
+/// Checks if command logging is enabled
+fn is_command_logging_enabled() -> bool {
+    APP_SETTINGS.with(|s| s.borrow().enable_command_logging)
 }
 
 /// Loads targets from targets.txt file
@@ -355,7 +362,12 @@ where
     question_label.set_justify(gtk::Justification::Center);
     
     // Info label
-    let info_label = Label::new(Some("This directory will store targets.txt, notes.md, and commands.log"));
+    let info_text = if is_command_logging_enabled() {
+        "This directory will store targets.txt, notes.md, and commands.log"
+    } else {
+        "This directory will store targets.txt and notes.md"
+    };
+    let info_label = Label::new(Some(info_text));
     info_label.set_opacity(0.7);
     info_label.set_wrap(true);
     info_label.set_justify(gtk::Justification::Center);
@@ -481,6 +493,61 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     // Separator
     let separator = Separator::new(Orientation::Horizontal);
     dialog_box.append(&separator);
+    
+    // Command Logging section
+    let logging_title = Label::new(Some("Command Logging"));
+    logging_title.add_css_class("title-3");
+    dialog_box.append(&logging_title);
+    
+    let logging_check = CheckButton::with_label("Enable Command Logging");
+    logging_check.set_active(is_command_logging_enabled());
+    let parent_for_msg = parent.clone();
+    logging_check.connect_toggled(move |check| {
+        // Save to settings
+        let mut settings = get_app_settings();
+        settings.enable_command_logging = check.is_active();
+        let _ = save_app_settings(&settings);
+        
+        // Show restart message using a simple dialog
+        let msg_dialog = gtk::Window::builder()
+            .transient_for(&parent_for_msg)
+            .modal(true)
+            .title("Settings Updated")
+            .default_width(350)
+            .default_height(150)
+            .build();
+        
+        let msg_box = GtkBox::new(Orientation::Vertical, 15);
+        msg_box.set_margin_top(20);
+        msg_box.set_margin_bottom(20);
+        msg_box.set_margin_start(20);
+        msg_box.set_margin_end(20);
+        
+        let msg_label = Label::new(Some("Please restart PenEnv for the command logging changes to take effect."));
+        msg_label.set_wrap(true);
+        msg_box.append(&msg_label);
+        
+        let ok_btn = Button::with_label("OK");
+        ok_btn.set_halign(gtk::Align::Center);
+        let msg_dialog_clone = msg_dialog.clone();
+        ok_btn.connect_clicked(move |_| {
+            msg_dialog_clone.close();
+        });
+        msg_box.append(&ok_btn);
+        
+        msg_dialog.set_child(Some(&msg_box));
+        msg_dialog.present();
+    });
+    dialog_box.append(&logging_check);
+    
+    let logging_info = Label::new(Some("When disabled, the Log tab will be hidden and commands will not be logged."));
+    logging_info.set_wrap(true);
+    logging_info.add_css_class("dim-label");
+    dialog_box.append(&logging_info);
+    
+    // Separator
+    let separator1_5 = Separator::new(Orientation::Horizontal);
+    dialog_box.append(&separator1_5);
     
     // Custom Commands section
     let commands_title = Label::new(Some("Custom Commands"));
@@ -1059,11 +1126,13 @@ fn create_main_window(app: &Application) {
     let notes_page = create_text_editor(&get_file_path("notes.md").to_string_lossy().to_string(), None);
     notebook.append_page(&notes_page, Some(&Label::new(Some("📝 Notes"))));
 
-    // Tab 3: Command Log (will be refreshed by shell tabs)
-    let log_page = create_readonly_viewer(&get_file_path("commands.log").to_string_lossy().to_string());
-    notebook.append_page(&log_page, Some(&Label::new(Some("📜 Log"))));
+    // Tab 3: Command Log (only if logging is enabled)
+    if is_command_logging_enabled() {
+        let log_page = create_readonly_viewer(&get_file_path("commands.log").to_string_lossy().to_string());
+        notebook.append_page(&log_page, Some(&Label::new(Some("📜 Log"))));
+    }
 
-    // Tab 4: First Shell
+    // Tab 4 (or 3 if no log): First Shell
     let shell_page = create_shell_tab(4, notebook.clone());
     let shell_label = create_editable_tab_label("💻 Shell 4", &notebook);
     notebook.append_page(&shell_page, Some(&shell_label));
@@ -1788,12 +1857,43 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook) -> GtkBox {
     let terminal = Terminal::new();
     terminal.set_vexpand(true);
     
-    // Spawn bash in the terminal
+    // Spawn bash in the terminal with command logging via PROMPT_COMMAND (if enabled)
+    let env_vars = if is_command_logging_enabled() {
+        let log_file = get_file_path("commands.log").to_string_lossy().to_string();
+        
+        // Set up bash to log commands after execution using PROMPT_COMMAND
+        // This captures only completed commands from history, not keystrokes or passwords
+        let prompt_cmd = format!(
+            r#"history -a; __penenv_last_cmd=$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//'); if [ -n "$__penenv_last_cmd" ] && [ "$__penenv_last_cmd" != "$__penenv_prev_cmd" ]; then echo "[$(date '+%Y-%m-%d %H:%M:%S')] $__penenv_last_cmd" >> '{}'; __penenv_prev_cmd="$__penenv_last_cmd"; fi"#,
+            log_file
+        );
+        
+        vec![
+            format!("PROMPT_COMMAND={}", prompt_cmd),
+            format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
+            format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "user".to_string())),
+            format!("PATH={}", std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string())),
+            format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
+            format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
+        ]
+    } else {
+        // Logging disabled - just pass through essential environment variables
+        vec![
+            format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
+            format!("USER={}", std::env::var("USER").unwrap_or_else(|_| "user".to_string())),
+            format!("PATH={}", std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string())),
+            format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
+            format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
+        ]
+    };
+    
+    let env_refs: Vec<&str> = env_vars.iter().map(|s| s.as_str()).collect();
+    
     let _ = terminal.spawn_async(
         vte4::PtyFlags::DEFAULT,
         None, // working directory
         &["/bin/bash"],
-        &[], // environment
+        &env_refs, // environment with PROMPT_COMMAND for logging
         gtk::glib::SpawnFlags::DEFAULT,
         || {}, // child setup
         -1, // timeout
@@ -1839,34 +1939,17 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook) -> GtkBox {
         }
     });
 
-    // Log commands - buffer input and log complete command lines
-    let command_buffer = Rc::new(RefCell::new(String::new()));
-    let buffer_clone = Rc::clone(&command_buffer);
-    let notebook_clone = notebook.clone();
+    // Command logging is now handled by bash PROMPT_COMMAND environment variable
+    // This only logs completed commands from history, not keystrokes or passwords
     
-    terminal.connect_commit(move |_, text, _| {
-        let mut buffer = buffer_clone.borrow_mut();
-        
-        // Process control characters
-        for ch in text.chars() {
-            if ch == '\x08' || ch == '\x7f' { // Backspace or DEL
-                buffer.pop();
-            } else if ch == '\n' || ch == '\r' {
-                // Complete line - log it
-                let command = buffer.trim().to_string();
-                buffer.clear();
-                
-                // Log non-empty commands (skip plain Enter presses)
-                if !command.is_empty() {
-                    log_command(&command);
-                    refresh_log_viewer(&notebook_clone);
-                }
-            } else if !ch.is_control() || ch == '\t' {
-                // Add printable characters and tabs
-                buffer.push(ch);
-            }
-        }
-    });
+    // Set up periodic log refresh to show new commands (only if logging is enabled)
+    if is_command_logging_enabled() {
+        let notebook_clone = notebook.clone();
+        glib::timeout_add_seconds_local(2, move || {
+            refresh_log_viewer(&notebook_clone);
+            glib::ControlFlow::Continue
+        });
+    }
 
     target_box.append(&target_combo);
     target_box.append(&insert_target_btn);
@@ -2728,20 +2811,6 @@ fn refresh_log_viewer(notebook: &Notebook) {
                 }
             }
         }
-    }
-}
-
-fn log_command(command: &str) {
-    let timestamp = Local::now().format("[%Y-%m-%d %H:%M:%S]");
-    let log_entry = format!("{} {}\n", timestamp, command);
-    
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(get_file_path("commands.log"))
-    {
-        use std::io::Write;
-        let _ = file.write_all(log_entry.as_bytes());
     }
 }
 

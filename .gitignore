@@ -8,6 +8,11 @@ Cargo.lock
 .vscode/
 .idea/
 
+# PenEnv runtime files
+.penenv_history*
+.penenv_bashrc
+.penenv_bash_env
+
 # PenEnv generated files (optional - remove if you want to track them)
 targets.txt
 notes.md
