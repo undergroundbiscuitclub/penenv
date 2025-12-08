@@ -241,6 +241,7 @@ Use `{target}` as a placeholder in commands - PenEnv will automatically prompt f
 - All standard terminal shortcuts
 - Target insertion via button, dropdown, or customizable popup shortcut (default `Ctrl+T`)
 - Target insertion works in shell tabs, notes tab, and split view
+- **Text Size Control**: Hold `Ctrl` and scroll mouse wheel to zoom in/out on text in all areas (targets, notes, log, and shell terminals)
 - **Command Templates Drawer**:
   - Click "📚 Commands" button to toggle drawer
   - Press `Ctrl+\`` to open/close drawer and focus search box

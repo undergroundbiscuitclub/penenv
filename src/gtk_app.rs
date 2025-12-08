@@ -321,6 +321,88 @@ fn update_custom_command(index: usize, command: CommandTemplate) -> Result<(), S
     }
 }
 
+/// Adds Ctrl+scroll zoom functionality to a TextView
+fn add_textview_scroll_zoom(text_view: &TextView) {
+    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    let text_view_clone = text_view.clone();
+    
+    // Store the current font scale in a RefCell
+    let font_scale = Rc::new(RefCell::new(1.0_f64));
+    let font_scale_clone = Rc::clone(&font_scale);
+    
+    // Clone scroll_controller to use inside the closure
+    let scroll_controller_clone = scroll_controller.clone();
+    scroll_controller.connect_scroll(move |_, _, dy| {
+        let modifiers = scroll_controller_clone.current_event_state();
+        if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            let mut scale = font_scale_clone.borrow_mut();
+            
+            // Adjust scale based on scroll direction
+            if dy < 0.0 {
+                *scale *= 1.1; // Zoom in
+            } else {
+                *scale *= 0.9; // Zoom out
+            }
+            
+            // Clamp scale to reasonable bounds
+            *scale = scale.clamp(0.5, 3.0);
+            
+            // Apply the font scale using CSS
+            let base_size = 10.0; // Base font size in points
+            let new_size = base_size * *scale;
+            
+            let css_provider = gtk::CssProvider::new();
+            let css = format!("textview {{ font-size: {}pt; }}", new_size);
+            css_provider.load_from_data(&css);
+            
+            let style_context = text_view_clone.style_context();
+            style_context.add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            
+            return gtk::glib::Propagation::Stop;
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    
+    text_view.add_controller(scroll_controller);
+}
+
+/// Adds Ctrl+scroll zoom functionality to a VTE Terminal
+fn add_terminal_scroll_zoom(terminal: &Terminal) {
+    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    let terminal_clone = terminal.clone();
+    
+    // Store the current font scale in a RefCell
+    let font_scale = Rc::new(RefCell::new(1.0_f64));
+    let font_scale_clone = Rc::clone(&font_scale);
+    
+    // Clone scroll_controller to use inside the closure
+    let scroll_controller_clone = scroll_controller.clone();
+    scroll_controller.connect_scroll(move |_, _, dy| {
+        let modifiers = scroll_controller_clone.current_event_state();
+        if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            let mut scale = font_scale_clone.borrow_mut();
+            
+            // Adjust scale based on scroll direction
+            if dy < 0.0 {
+                *scale *= 1.1; // Zoom in
+            } else {
+                *scale *= 0.9; // Zoom out
+            }
+            
+            // Clamp scale to reasonable bounds
+            *scale = scale.clamp(0.5, 3.0);
+            
+            // Apply the font scale to the terminal
+            terminal_clone.set_font_scale(*scale);
+            
+            return gtk::glib::Propagation::Stop;
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    
+    terminal.add_controller(scroll_controller);
+}
+
 /// Builds and initializes the main application UI
 /// 
 /// Shows a base directory selection dialog on startup, then creates the main window
@@ -1698,6 +1780,9 @@ fn create_text_editor(file_path: &str, notebook: Option<Notebook>) -> GtkBox {
         apply_markdown_highlighting(&text_view);
     }
 
+    // Add Ctrl+scroll zoom functionality
+    add_textview_scroll_zoom(&text_view);
+
     scrolled.set_child(Some(&text_view));
 
     // Auto-save for notes.md with debounce
@@ -1853,6 +1938,9 @@ fn create_readonly_viewer(file_path: &str) -> GtkBox {
         text_view.scroll_to_iter(&mut end_iter, 0.0, false, 0.0, 0.0);
     }
 
+    // Add Ctrl+scroll zoom functionality
+    add_textview_scroll_zoom(&text_view);
+
     scrolled.set_child(Some(&text_view));
 
     let button_box = GtkBox::new(Orientation::Horizontal, 5);
@@ -1907,6 +1995,9 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook, shell_counter: Op
     
     // Apply markdown highlighting
     apply_markdown_highlighting(&notes_view);
+
+    // Add Ctrl+scroll zoom functionality
+    add_textview_scroll_zoom(&notes_view);
 
     // Auto-save notes with debounce
     let notes_path_clone = notes_path.clone();
@@ -2070,6 +2161,9 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<
     // Create VTE terminal widget
     let terminal = Terminal::new();
     terminal.set_vexpand(true);
+    
+    // Add Ctrl+scroll zoom functionality
+    add_terminal_scroll_zoom(&terminal);
     
     // Build base environment variables for shell
     let mut env_vars = vec![
