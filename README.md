@@ -37,6 +37,13 @@ Add custom commands:
   - Configurable visibility via settings
   - Live updates every second
   - Compact display in toolbar
+- **Global Text & Terminal Zoom**: Adjust text size for all tabs simultaneously
+  - Hold `Ctrl` and scroll mouse wheel to zoom in/out anywhere (targets, notes, log, shells)
+  - Changes apply to all open tabs in real-time
+  - Zoom settings persist across sessions
+  - Configurable in Settings dialog with slider controls
+  - Independent zoom levels for text editors and terminal shells
+  - Zoom range: 50% to 300% of base font size
 - **Target Management**: 
   - Dropdown selector to quickly insert targets into shell commands
   - Quick popup selector with customizable shortcut (default `Ctrl+T`) for keyboard-driven target selection
@@ -49,6 +56,7 @@ Add custom commands:
 - **Base Directory Selection**: Choose where to store project files on startup
 - **Settings Dialog**: 
   - Configure system monitor visibility (CPU, RAM, Network)
+  - Adjust global text and terminal zoom levels with slider controls
   - Customize keyboard shortcuts for drawer toggle and target insertion
   - Manage custom commands
   - Settings persisted to `~/.config/penenv/settings.yaml`
@@ -241,7 +249,11 @@ Use `{target}` as a placeholder in commands - PenEnv will automatically prompt f
 - All standard terminal shortcuts
 - Target insertion via button, dropdown, or customizable popup shortcut (default `Ctrl+T`)
 - Target insertion works in shell tabs, notes tab, and split view
-- **Text Size Control**: Hold `Ctrl` and scroll mouse wheel to zoom in/out on text in all areas (targets, notes, log, and shell terminals)
+- **Global Text Size Control**: 
+  - Hold `Ctrl` and scroll mouse wheel to zoom in/out on text
+  - Zoom changes apply to ALL tabs simultaneously (targets, notes, log, and all shell terminals)
+  - Settings persist across sessions and are configurable in Settings dialog
+  - Separate zoom levels for text editors and terminal shells
 - **Command Templates Drawer**:
   - Click "📚 Commands" button to toggle drawer
   - Press `Ctrl+\`` to open/close drawer and focus search box
@@ -272,7 +284,7 @@ PenEnv creates and manages the following files:
 
 ### Configuration Files
 - `~/.config/penenv/custom_commands.yaml` - User-defined custom commands
-- `~/.config/penenv/settings.yaml` - Application settings (monitor visibility, keyboard shortcuts)
+- `~/.config/penenv/settings.yaml` - Application settings (monitor visibility, keyboard shortcuts, zoom levels)
 
 The application includes an embedded `commands.yaml` file compiled into the binary with 30+ pre-configured penetration testing commands.
 

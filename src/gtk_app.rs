@@ -63,6 +63,8 @@ struct AppSettings {
     monitor_visibility: MonitorVisibility,
     keyboard_shortcuts: KeyboardShortcuts,
     enable_command_logging: bool,
+    text_zoom_scale: Option<f64>,
+    terminal_zoom_scale: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -88,6 +90,8 @@ impl Default for AppSettings {
             monitor_visibility: MonitorVisibility::default(),
             keyboard_shortcuts: KeyboardShortcuts::default(),
             enable_command_logging: true,
+            text_zoom_scale: Some(1.0),
+            terminal_zoom_scale: Some(1.0),
         }
     }
 }
@@ -112,7 +116,15 @@ thread_local! {
             new_split: Some("S".to_string()),
         },
         enable_command_logging: true,
+        text_zoom_scale: Some(1.0),
+        terminal_zoom_scale: Some(1.0),
     });
+    // Global zoom scales that affect all text views and terminals
+    static TEXT_ZOOM_SCALE: RefCell<f64> = RefCell::new(1.0);
+    static TERMINAL_ZOOM_SCALE: RefCell<f64> = RefCell::new(1.0);
+    // Lists to track all text views and terminals for global zoom updates
+    static TEXT_VIEWS: RefCell<Vec<TextView>> = RefCell::new(Vec::new());
+    static TERMINALS: RefCell<Vec<Terminal>> = RefCell::new(Vec::new());
 }
 
 /// Sets the base directory for storing project files
@@ -169,6 +181,13 @@ fn load_app_settings() -> AppSettings {
                 APP_SETTINGS.with(|s| {
                     *s.borrow_mut() = settings.clone();
                 });
+                // Load zoom scales into global state
+                if let Some(text_scale) = settings.text_zoom_scale {
+                    TEXT_ZOOM_SCALE.with(|s| *s.borrow_mut() = text_scale.clamp(0.5, 3.0));
+                }
+                if let Some(terminal_scale) = settings.terminal_zoom_scale {
+                    TERMINAL_ZOOM_SCALE.with(|s| *s.borrow_mut() = terminal_scale.clamp(0.5, 3.0));
+                }
                 return settings;
             }
         }
@@ -202,6 +221,67 @@ fn get_keyboard_shortcuts() -> KeyboardShortcuts {
 /// Checks if command logging is enabled
 fn is_command_logging_enabled() -> bool {
     APP_SETTINGS.with(|s| s.borrow().enable_command_logging)
+}
+
+/// Gets the current text zoom scale
+fn get_text_zoom_scale() -> f64 {
+    TEXT_ZOOM_SCALE.with(|s| *s.borrow())
+}
+
+/// Sets the text zoom scale and updates all text views
+fn set_text_zoom_scale(scale: f64) {
+    let clamped = scale.clamp(0.5, 3.0);
+    TEXT_ZOOM_SCALE.with(|s| *s.borrow_mut() = clamped);
+    
+    // Update all tracked text views
+    TEXT_VIEWS.with(|views| {
+        let views = views.borrow();
+        for view in views.iter() {
+            apply_text_zoom_to_view(view, clamped);
+        }
+    });
+    
+    // Save to settings
+    let mut settings = get_app_settings();
+    settings.text_zoom_scale = Some(clamped);
+    let _ = save_app_settings(&settings);
+}
+
+/// Gets the current terminal zoom scale
+fn get_terminal_zoom_scale() -> f64 {
+    TERMINAL_ZOOM_SCALE.with(|s| *s.borrow())
+}
+
+/// Sets the terminal zoom scale and updates all terminals
+fn set_terminal_zoom_scale(scale: f64) {
+    let clamped = scale.clamp(0.5, 3.0);
+    TERMINAL_ZOOM_SCALE.with(|s| *s.borrow_mut() = clamped);
+    
+    // Update all tracked terminals
+    TERMINALS.with(|terminals| {
+        let terminals = terminals.borrow();
+        for terminal in terminals.iter() {
+            terminal.set_font_scale(clamped);
+        }
+    });
+    
+    // Save to settings
+    let mut settings = get_app_settings();
+    settings.terminal_zoom_scale = Some(clamped);
+    let _ = save_app_settings(&settings);
+}
+
+/// Apply zoom scale to a specific text view using CSS
+fn apply_text_zoom_to_view(text_view: &TextView, scale: f64) {
+    let base_size = 10.0;
+    let new_size = base_size * scale;
+    
+    let css_provider = gtk::CssProvider::new();
+    let css = format!("textview {{ font-size: {}pt; }}", new_size);
+    css_provider.load_from_data(&css);
+    
+    let style_context = text_view.style_context();
+    style_context.add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
 /// Loads targets from targets.txt file
@@ -321,42 +401,35 @@ fn update_custom_command(index: usize, command: CommandTemplate) -> Result<(), S
     }
 }
 
-/// Adds Ctrl+scroll zoom functionality to a TextView
+/// Adds Ctrl+scroll zoom functionality to a TextView (global zoom)
 fn add_textview_scroll_zoom(text_view: &TextView) {
-    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-    let text_view_clone = text_view.clone();
+    // Track this text view for global zoom updates
+    TEXT_VIEWS.with(|views| {
+        views.borrow_mut().push(text_view.clone());
+    });
     
-    // Store the current font scale in a RefCell
-    let font_scale = Rc::new(RefCell::new(1.0_f64));
-    let font_scale_clone = Rc::clone(&font_scale);
+    // Apply current zoom scale
+    let current_scale = get_text_zoom_scale();
+    apply_text_zoom_to_view(text_view, current_scale);
+    
+    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     
     // Clone scroll_controller to use inside the closure
     let scroll_controller_clone = scroll_controller.clone();
     scroll_controller.connect_scroll(move |_, _, dy| {
         let modifiers = scroll_controller_clone.current_event_state();
         if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
-            let mut scale = font_scale_clone.borrow_mut();
+            let current = get_text_zoom_scale();
             
             // Adjust scale based on scroll direction
-            if dy < 0.0 {
-                *scale *= 1.1; // Zoom in
+            let new_scale = if dy < 0.0 {
+                current * 1.1 // Zoom in
             } else {
-                *scale *= 0.9; // Zoom out
-            }
+                current * 0.9 // Zoom out
+            };
             
-            // Clamp scale to reasonable bounds
-            *scale = scale.clamp(0.5, 3.0);
-            
-            // Apply the font scale using CSS
-            let base_size = 10.0; // Base font size in points
-            let new_size = base_size * *scale;
-            
-            let css_provider = gtk::CssProvider::new();
-            let css = format!("textview {{ font-size: {}pt; }}", new_size);
-            css_provider.load_from_data(&css);
-            
-            let style_context = text_view_clone.style_context();
-            style_context.add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            // Update global scale (this updates all text views)
+            set_text_zoom_scale(new_scale);
             
             return gtk::glib::Propagation::Stop;
         }
@@ -366,34 +439,35 @@ fn add_textview_scroll_zoom(text_view: &TextView) {
     text_view.add_controller(scroll_controller);
 }
 
-/// Adds Ctrl+scroll zoom functionality to a VTE Terminal
+/// Adds Ctrl+scroll zoom functionality to a VTE Terminal (global zoom)
 fn add_terminal_scroll_zoom(terminal: &Terminal) {
-    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-    let terminal_clone = terminal.clone();
+    // Track this terminal for global zoom updates
+    TERMINALS.with(|terminals| {
+        terminals.borrow_mut().push(terminal.clone());
+    });
     
-    // Store the current font scale in a RefCell
-    let font_scale = Rc::new(RefCell::new(1.0_f64));
-    let font_scale_clone = Rc::clone(&font_scale);
+    // Apply current zoom scale
+    let current_scale = get_terminal_zoom_scale();
+    terminal.set_font_scale(current_scale);
+    
+    let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     
     // Clone scroll_controller to use inside the closure
     let scroll_controller_clone = scroll_controller.clone();
     scroll_controller.connect_scroll(move |_, _, dy| {
         let modifiers = scroll_controller_clone.current_event_state();
         if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
-            let mut scale = font_scale_clone.borrow_mut();
+            let current = get_terminal_zoom_scale();
             
             // Adjust scale based on scroll direction
-            if dy < 0.0 {
-                *scale *= 1.1; // Zoom in
+            let new_scale = if dy < 0.0 {
+                current * 1.1 // Zoom in
             } else {
-                *scale *= 0.9; // Zoom out
-            }
+                current * 0.9 // Zoom out
+            };
             
-            // Clamp scale to reasonable bounds
-            *scale = scale.clamp(0.5, 3.0);
-            
-            // Apply the font scale to the terminal
-            terminal_clone.set_font_scale(*scale);
+            // Update global scale (this updates all terminals)
+            set_terminal_zoom_scale(new_scale);
             
             return gtk::glib::Propagation::Stop;
         }
@@ -644,6 +718,70 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     logging_info.set_wrap(true);
     logging_info.add_css_class("dim-label");
     general_box.append(&logging_info);
+    
+    // Separator
+    let separator2 = Separator::new(Orientation::Horizontal);
+    general_box.append(&separator2);
+    
+    // Text Zoom section
+    let zoom_title = Label::new(Some("Text & Terminal Zoom"));
+    zoom_title.add_css_class("title-3");
+    general_box.append(&zoom_title);
+    
+    let zoom_info = Label::new(Some("Adjust text size globally for all tabs (targets, notes, log, shells). Use Ctrl+Scroll to change zoom interactively."));
+    zoom_info.set_wrap(true);
+    zoom_info.add_css_class("dim-label");
+    general_box.append(&zoom_info);
+    
+    // Text zoom control
+    let text_zoom_box = GtkBox::new(Orientation::Horizontal, 10);
+    let text_zoom_label = Label::new(Some("Text Zoom (Targets/Notes/Log):"));
+    text_zoom_label.set_width_chars(30);
+    text_zoom_label.set_xalign(0.0);
+    text_zoom_box.append(&text_zoom_label);
+    
+    let text_zoom_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.5, 3.0, 0.1);
+    text_zoom_scale.set_value(get_text_zoom_scale());
+    text_zoom_scale.set_hexpand(true);
+    text_zoom_scale.set_draw_value(true);
+    text_zoom_scale.set_value_pos(gtk::PositionType::Right);
+    text_zoom_scale.connect_value_changed(|scale| {
+        set_text_zoom_scale(scale.value());
+    });
+    text_zoom_box.append(&text_zoom_scale);
+    
+    let text_reset_btn = Button::with_label("Reset");
+    text_reset_btn.connect_clicked(move |_| {
+        set_text_zoom_scale(1.0);
+        text_zoom_scale.set_value(1.0);
+    });
+    text_zoom_box.append(&text_reset_btn);
+    general_box.append(&text_zoom_box);
+    
+    // Terminal zoom control
+    let terminal_zoom_box = GtkBox::new(Orientation::Horizontal, 10);
+    let terminal_zoom_label = Label::new(Some("Terminal Zoom (Shells):"));
+    terminal_zoom_label.set_width_chars(30);
+    terminal_zoom_label.set_xalign(0.0);
+    terminal_zoom_box.append(&terminal_zoom_label);
+    
+    let terminal_zoom_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.5, 3.0, 0.1);
+    terminal_zoom_scale.set_value(get_terminal_zoom_scale());
+    terminal_zoom_scale.set_hexpand(true);
+    terminal_zoom_scale.set_draw_value(true);
+    terminal_zoom_scale.set_value_pos(gtk::PositionType::Right);
+    terminal_zoom_scale.connect_value_changed(|scale| {
+        set_terminal_zoom_scale(scale.value());
+    });
+    terminal_zoom_box.append(&terminal_zoom_scale);
+    
+    let terminal_reset_btn = Button::with_label("Reset");
+    terminal_reset_btn.connect_clicked(move |_| {
+        set_terminal_zoom_scale(1.0);
+        terminal_zoom_scale.set_value(1.0);
+    });
+    terminal_zoom_box.append(&terminal_reset_btn);
+    general_box.append(&terminal_zoom_box);
     
     notebook.append_page(&general_box, Some(&Label::new(Some("⚙️ General"))));
     
