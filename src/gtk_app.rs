@@ -1137,7 +1137,6 @@ fn show_settings_dialog(parent: &ApplicationWindow, cpu_frame: &Frame, ram_frame
     bottom_box.set_margin_start(20);
     bottom_box.set_margin_end(20);
     bottom_box.set_halign(gtk::Align::End);
-    bottom_box.set_halign(gtk::Align::End);
     let close_btn = Button::with_label("Close");
     let dialog_clone = dialog.clone();
     close_btn.connect_clicked(move |_| {
@@ -1512,7 +1511,7 @@ fn create_main_window(app: &Application) {
     }
 
     // Tab 4 (or 3 if no log): First Shell
-    let shell_page = create_shell_tab(4, notebook.clone(), Some(shell_counter.clone()));
+    let shell_page = create_shell_tab(4, notebook.clone(), Some(shell_counter.clone()), true);
     let shell_label = create_editable_tab_label("💻 Shell 4", &notebook);
     notebook.append_page(&shell_page, Some(&shell_label));
 
@@ -1527,6 +1526,15 @@ fn create_main_window(app: &Application) {
     let split_mode_btn = Button::with_label("⚡ Split Mode");
     let close_tab_btn = Button::with_label("❌ Close Tab");
     let settings_btn = Button::with_label("⚙️");
+    
+    // Add "No Log" shell button only if logging is enabled
+    let new_shell_nolog_btn = if is_command_logging_enabled() {
+        let btn = Button::with_label("🔇 Shell (No Log)");
+        btn.set_tooltip_text(Some("Create a new shell without command logging"));
+        Some(btn)
+    } else {
+        None
+    };
     
     // System monitors on the right
     let monitors_box = GtkBox::new(Orientation::Horizontal, 5);
@@ -1597,6 +1605,15 @@ fn create_main_window(app: &Application) {
         create_new_shell_tab(&notebook_clone, &shell_counter_clone);
     });
 
+    // No-log shell button handler (if it exists)
+    if let Some(ref nolog_btn) = new_shell_nolog_btn {
+        let notebook_clone_nolog = notebook.clone();
+        let shell_counter_clone_nolog = Rc::clone(&shell_counter);
+        nolog_btn.connect_clicked(move |_| {
+            create_new_shell_tab_no_log(&notebook_clone_nolog, &shell_counter_clone_nolog);
+        });
+    }
+
     let notebook_clone2 = notebook.clone();
     let shell_counter_clone2 = Rc::clone(&shell_counter);
     split_mode_btn.connect_clicked(move |_| {
@@ -1623,6 +1640,9 @@ fn create_main_window(app: &Application) {
     });
 
     toolbar.append(&new_shell_btn);
+    if let Some(ref nolog_btn) = new_shell_nolog_btn {
+        toolbar.append(nolog_btn);
+    }
     toolbar.append(&split_mode_btn);
     toolbar.append(&close_tab_btn);
     toolbar.append(&settings_btn);
@@ -1993,7 +2013,23 @@ fn create_text_editor(file_path: &str, notebook: Option<Notebook>) -> GtkBox {
         }
     });
 
+    // Reload button
+    let reload_btn = Button::with_label("🔄 Reload");
+    reload_btn.set_tooltip_text(Some("Reload file from disk"));
+    let file_path_reload = file_path.to_string();
+    let text_view_reload = text_view.clone();
+    let is_notes_reload = is_notes;
+    reload_btn.connect_clicked(move |_| {
+        if let Ok(content) = fs::read_to_string(&file_path_reload) {
+            text_view_reload.buffer().set_text(&content);
+            if is_notes_reload {
+                apply_markdown_highlighting(&text_view_reload);
+            }
+        }
+    });
+
     button_box.append(&save_btn);
+    button_box.append(&reload_btn);
     button_box.append(&Label::new(Some(file_path)));
 
     // Add Ctrl+S keyboard shortcut
@@ -2185,7 +2221,20 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook, shell_counter: Op
         let _ = fs::write(&notes_path_clone2, text.as_str());
     });
 
+    // Reload button for split view notes
+    let reload_btn = Button::with_label("🔄 Reload");
+    reload_btn.set_tooltip_text(Some("Reload file from disk"));
+    let notes_path_reload = notes_path.clone();
+    let notes_view_reload = notes_view.clone();
+    reload_btn.connect_clicked(move |_| {
+        if let Ok(content) = fs::read_to_string(&notes_path_reload) {
+            notes_view_reload.buffer().set_text(&content);
+            apply_markdown_highlighting(&notes_view_reload);
+        }
+    });
+
     button_box.append(&save_btn);
+    button_box.append(&reload_btn);
     button_box.append(&Label::new(Some("notes.md")));
 
     // Add Ctrl+S keyboard shortcut
@@ -2230,7 +2279,7 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook, shell_counter: Op
     notes_container.append(&button_box);
     
     // Right side: Shell tab
-    let shell_container = create_shell_tab(_shell_id, notebook, shell_counter);
+    let shell_container = create_shell_tab(_shell_id, notebook, shell_counter, true);
     
     paned.set_start_child(Some(&notes_container));
     paned.set_end_child(Some(&shell_container));
@@ -2245,9 +2294,24 @@ fn create_split_view_tab(_shell_id: usize, notebook: Notebook, shell_counter: Op
 
 // Helper function to create a new shell tab (callable from anywhere including terminal keyboard handler)
 fn create_new_shell_tab(notebook: &Notebook, shell_counter: &Rc<RefCell<usize>>) {
+    create_new_shell_tab_with_logging(notebook, shell_counter, true);
+}
+
+// Helper function to create a new shell tab without logging
+fn create_new_shell_tab_no_log(notebook: &Notebook, shell_counter: &Rc<RefCell<usize>>) {
+    create_new_shell_tab_with_logging(notebook, shell_counter, false);
+}
+
+// Internal helper that supports logging toggle
+fn create_new_shell_tab_with_logging(notebook: &Notebook, shell_counter: &Rc<RefCell<usize>>, enable_logging: bool) {
     let mut counter = shell_counter.borrow_mut();
-    let shell_page = create_shell_tab(*counter, notebook.clone(), Some(Rc::clone(shell_counter)));
-    let shell_label = create_editable_tab_label(&format!("💻 Shell {}", *counter), notebook);
+    let shell_page = create_shell_tab(*counter, notebook.clone(), Some(Rc::clone(shell_counter)), enable_logging);
+    let label_text = if enable_logging {
+        format!("💻 Shell {}", *counter)
+    } else {
+        format!("🔇 Shell {}", *counter)
+    };
+    let shell_label = create_editable_tab_label(&label_text, notebook);
     let page_num = notebook.append_page(&shell_page, Some(&shell_label));
     notebook.set_current_page(Some(page_num));
     focus_terminal_in_page(&shell_page.upcast_ref::<gtk::Widget>());
@@ -2264,7 +2328,7 @@ fn create_new_split_view_tab(notebook: &Notebook, shell_counter: &Rc<RefCell<usi
     focus_terminal_in_split_view(&split_page.upcast_ref::<gtk::Widget>());
 }
 
-fn create_shell_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<Rc<RefCell<usize>>>) -> GtkBox {
+fn create_shell_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<Rc<RefCell<usize>>>, enable_logging: bool) -> GtkBox {
     let outer_container = GtkBox::new(Orientation::Vertical, 5);
     outer_container.set_margin_top(5);
     outer_container.set_margin_bottom(5);
@@ -2312,8 +2376,8 @@ fn create_shell_tab(_shell_id: usize, notebook: Notebook, shell_counter: Option<
         format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
     ];
     
-    // Add command logging via PROMPT_COMMAND if enabled
-    if is_command_logging_enabled() {
+    // Add command logging via PROMPT_COMMAND if enabled (globally and for this shell)
+    if enable_logging && is_command_logging_enabled() {
         let log_file = get_file_path("commands.log").to_string_lossy().to_string();
         
         // Set up bash to log commands after execution using PROMPT_COMMAND

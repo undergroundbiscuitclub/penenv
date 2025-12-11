@@ -12,17 +12,23 @@
 //! - Markdown syntax highlighting for notes
 //! - Base directory selection for project organization
 
-mod gtk_app;
+mod config;
+mod commands;
+mod ui;
 
 use gtk4::prelude::*;
 use gtk4::{Application, glib};
 
 fn main() -> glib::ExitCode {
+    // Initialize logging
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    
     let app = Application::builder()
         .application_id("com.penenv.app")
         .build();
 
-    app.connect_activate(gtk_app::build_ui);
+    app.connect_activate(ui::build_ui);
 
     app.run()
 }
+
