@@ -242,17 +242,3 @@ pub fn load_targets() -> Vec<String> {
         Vec::new()
     }
 }
-
-/// Format bytes to human-readable string
-pub fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    
-    if bytes >= MB {
-        format!("{:.1} MB/s", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB/s", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B/s", bytes)
-    }
-}

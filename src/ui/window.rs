@@ -4,7 +4,7 @@
 
 use gtk4::prelude::*;
 use gtk4::{self as gtk, Application, Box as GtkBox, Button, Label, Notebook, 
-          Orientation, ProgressBar, Frame};
+          Orientation, Frame};
 use gtk4::glib;
 use libadwaita::{self as adw, prelude::*};
 use std::cell::RefCell;
@@ -13,7 +13,7 @@ use sysinfo::{System, Networks};
 
 use crate::config::{
     load_app_settings, get_keyboard_shortcuts,
-    is_command_logging_enabled, get_file_path, set_base_dir, format_bytes, tabs,
+    is_command_logging_enabled, get_file_path, set_base_dir, tabs,
 };
 use crate::ui::dialogs::{show_base_dir_dialog, show_settings_dialog};
 use crate::ui::editor::{create_text_editor, create_readonly_viewer};
@@ -106,40 +106,14 @@ fn create_main_window(app: &Application) {
     // Right side: System monitors and settings
     let monitors_box = GtkBox::new(Orientation::Horizontal, 8);
     
-    // CPU Monitor
-    let cpu_frame = create_monitor_widget("CPU", settings.monitor_visibility.show_cpu);
-    let cpu_bar = cpu_frame
-        .child()
-        .and_then(|c| c.last_child())
-        .and_downcast::<ProgressBar>()
-        .expect("CPU progress bar");
+    // CPU Monitor - vertical bar
+    let (cpu_frame, cpu_drawing) = create_vertical_bar_monitor("CPU", settings.monitor_visibility.show_cpu);
     
-    // RAM Monitor
-    let ram_frame = create_monitor_widget("RAM", settings.monitor_visibility.show_ram);
-    let ram_bar = ram_frame
-        .child()
-        .and_then(|c| c.last_child())
-        .and_downcast::<ProgressBar>()
-        .expect("RAM progress bar");
+    // RAM Monitor - vertical bar
+    let (ram_frame, ram_drawing) = create_vertical_bar_monitor("RAM", settings.monitor_visibility.show_ram);
     
-    // Network Monitor
-    let net_frame = Frame::new(None);
-    net_frame.set_visible(settings.monitor_visibility.show_network);
-    net_frame.add_css_class("card");
-    let net_box = GtkBox::new(Orientation::Vertical, 2);
-    net_box.set_margin_top(4);
-    net_box.set_margin_bottom(4);
-    net_box.set_margin_start(8);
-    net_box.set_margin_end(8);
-    let net_label = Label::new(Some("NET"));
-    net_label.add_css_class("caption");
-    net_label.set_opacity(0.7);
-    let net_text = Label::new(Some("↓ 0 KB/s ↑ 0 KB/s"));
-    net_text.add_css_class("caption");
-    net_text.add_css_class("numeric");
-    net_box.append(&net_label);
-    net_box.append(&net_text);
-    net_frame.set_child(Some(&net_box));
+    // Network Monitor - line graph
+    let (net_frame, net_drawing, net_history) = create_network_monitor(settings.monitor_visibility.show_network);
     
     monitors_box.append(&cpu_frame);
     monitors_box.append(&ram_frame);
@@ -218,7 +192,7 @@ fn create_main_window(app: &Application) {
     });
 
     // Initialize system monitoring
-    setup_system_monitoring(&cpu_bar, &ram_bar, &net_text);
+    setup_system_monitoring(&cpu_drawing, &ram_drawing, &net_drawing, &net_history);
 
     // Add handler to refresh notes tab when switched to
     notebook.connect_switch_page(move |notebook, page, page_num| {
@@ -333,8 +307,68 @@ fn create_main_window(app: &Application) {
     window.present();
 }
 
-/// Creates a monitor widget (CPU/RAM style)
-fn create_monitor_widget(label_text: &str, visible: bool) -> Frame {
+/// Creates a vertical bar monitor widget (CPU/RAM style)
+fn create_vertical_bar_monitor(label_text: &str, visible: bool) -> (Frame, gtk::DrawingArea) {
+    let frame = Frame::new(None);
+    frame.set_visible(visible);
+    frame.add_css_class("card");
+    
+    let container = GtkBox::new(Orientation::Vertical, 2);
+    container.set_margin_top(4);
+    container.set_margin_bottom(4);
+    container.set_margin_start(6);
+    container.set_margin_end(6);
+    
+    let label = Label::new(Some(label_text));
+    label.add_css_class("caption");
+    label.set_opacity(0.7);
+    
+    let drawing_area = gtk::DrawingArea::new();
+    drawing_area.set_width_request(30);
+    drawing_area.set_height_request(30);
+    drawing_area.set_content_width(30);
+    drawing_area.set_content_height(30);
+    
+    let value = Rc::new(RefCell::new(0.0f64));
+    let value_clone = Rc::clone(&value);
+    
+    drawing_area.set_draw_func(move |_, cr, width, height| {
+        let val = *value_clone.borrow();
+        
+        // Background
+        cr.set_source_rgba(0.2, 0.2, 0.2, 0.3);
+        let _ = cr.rectangle(0.0, 0.0, width as f64, height as f64);
+        let _ = cr.fill();
+        
+        // Bar (from bottom up)
+        let bar_height = height as f64 * val;
+        let y = height as f64 - bar_height;
+        
+        cr.set_source_rgba(0.3, 0.6, 1.0, 0.8);
+        let _ = cr.rectangle(0.0, y, width as f64, bar_height);
+        let _ = cr.fill();
+        
+        // Percentage text
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+        cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
+        cr.set_font_size(9.0);
+        let text = format!("{:.0}", val * 100.0);
+        let extents = cr.text_extents(&text).unwrap();
+        let x = (width as f64 - extents.width()) / 2.0;
+        let y_pos = height as f64 / 2.0 + extents.height() / 2.0;
+        let _ = cr.move_to(x, y_pos);
+        let _ = cr.show_text(&text);
+    });
+    
+    container.append(&label);
+    container.append(&drawing_area);
+    frame.set_child(Some(&container));
+    
+    (frame, drawing_area)
+}
+
+/// Creates a network monitor with line graph
+fn create_network_monitor(visible: bool) -> (Frame, gtk::DrawingArea, Rc<RefCell<Vec<(f64, f64)>>>) {
     let frame = Frame::new(None);
     frame.set_visible(visible);
     frame.add_css_class("card");
@@ -345,20 +379,74 @@ fn create_monitor_widget(label_text: &str, visible: bool) -> Frame {
     container.set_margin_start(8);
     container.set_margin_end(8);
     
-    let label = Label::new(Some(label_text));
+    let label = Label::new(Some("Network"));
     label.add_css_class("caption");
     label.set_opacity(0.7);
     
-    let bar = ProgressBar::new();
-    bar.set_width_request(50);
-    bar.set_show_text(true);
-    bar.add_css_class("osd");
+    let drawing_area = gtk::DrawingArea::new();
+    drawing_area.set_width_request(125);
+    drawing_area.set_height_request(30);
+    drawing_area.set_content_width(125);
+    drawing_area.set_content_height(30);
+    
+    // Store history of (download, upload) in KB/s - keep last 60 samples
+    let history: Rc<RefCell<Vec<(f64, f64)>>> = Rc::new(RefCell::new(Vec::new()));
+    let history_clone = Rc::clone(&history);
+    
+    drawing_area.set_draw_func(move |_, cr, width, height| {
+        let hist = history_clone.borrow();
+        
+        // Background
+        cr.set_source_rgba(0.2, 0.2, 0.2, 0.3);
+        let _ = cr.rectangle(0.0, 0.0, width as f64, height as f64);
+        let _ = cr.fill();
+        
+        if hist.is_empty() {
+            return;
+        }
+        
+        // Find max value for scaling
+        let max_val = hist.iter()
+            .map(|(d, u)| d.max(*u))
+            .fold(1.0f64, |a, b| a.max(b));
+        
+        let scale_y = height as f64 / max_val;
+        let scale_x = width as f64 / 60.0;
+        
+        // Draw download line (green)
+        cr.set_source_rgba(0.3, 0.8, 0.4, 0.9);
+        cr.set_line_width(1.5);
+        for (i, (down, _)) in hist.iter().enumerate() {
+            let x = i as f64 * scale_x;
+            let y = height as f64 - (down * scale_y);
+            if i == 0 {
+                let _ = cr.move_to(x, y);
+            } else {
+                let _ = cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+        
+        // Draw upload line (blue)
+        cr.set_source_rgba(0.3, 0.6, 1.0, 0.9);
+        cr.set_line_width(1.5);
+        for (i, (_, up)) in hist.iter().enumerate() {
+            let x = i as f64 * scale_x;
+            let y = height as f64 - (up * scale_y);
+            if i == 0 {
+                let _ = cr.move_to(x, y);
+            } else {
+                let _ = cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+    });
     
     container.append(&label);
-    container.append(&bar);
+    container.append(&drawing_area);
     frame.set_child(Some(&container));
     
-    frame
+    (frame, drawing_area, history)
 }
 
 /// Creates a modern tab label with icon and text
@@ -410,15 +498,158 @@ pub fn create_new_split_view_tab(notebook: &Notebook, shell_counter: &Rc<RefCell
 }
 
 /// Sets up system monitoring with periodic updates
-fn setup_system_monitoring(cpu_bar: &ProgressBar, ram_bar: &ProgressBar, net_text: &Label) {
+fn setup_system_monitoring(
+    cpu_drawing: &gtk::DrawingArea,
+    ram_drawing: &gtk::DrawingArea,
+    net_drawing: &gtk::DrawingArea,
+    net_history: &Rc<RefCell<Vec<(f64, f64)>>>,
+) {
     let sys = Rc::new(RefCell::new(System::new_all()));
     let networks = Rc::new(RefCell::new(Networks::new_with_refreshed_list()));
     let prev_rx = Rc::new(RefCell::new(0u64));
     let prev_tx = Rc::new(RefCell::new(0u64));
     
-    let cpu_bar_clone = cpu_bar.clone();
-    let ram_bar_clone = ram_bar.clone();
-    let net_text_clone = net_text.clone();
+    let cpu_value = Rc::new(RefCell::new(0.0f64));
+    let ram_value = Rc::new(RefCell::new(0.0f64));
+    
+    let cpu_drawing_clone = cpu_drawing.clone();
+    let ram_drawing_clone = ram_drawing.clone();
+    let net_drawing_clone = net_drawing.clone();
+    let net_history_clone = Rc::clone(net_history);
+    
+    // Store drawing area value updaters
+    let cpu_value_for_draw = Rc::clone(&cpu_value);
+    cpu_drawing.set_draw_func(move |_, cr, width, height| {
+        let val = *cpu_value_for_draw.borrow();
+        
+        cr.set_source_rgba(0.2, 0.2, 0.2, 0.3);
+        let _ = cr.rectangle(0.0, 0.0, width as f64, height as f64);
+        let _ = cr.fill();
+        
+        let bar_height = height as f64 * val;
+        let y = height as f64 - bar_height;
+        
+        cr.set_source_rgba(0.3, 0.6, 1.0, 0.8);
+        let _ = cr.rectangle(0.0, y, width as f64, bar_height);
+        let _ = cr.fill();
+        
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+        cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
+        cr.set_font_size(9.0);
+        let text = format!("{:.0}%", val * 100.0);
+        let extents = cr.text_extents(&text).unwrap();
+        let x = (width as f64 - extents.width()) / 2.0;
+        let y_pos = height as f64 / 2.0 + extents.height() / 2.0;
+        let _ = cr.move_to(x, y_pos);
+        let _ = cr.show_text(&text);
+    });
+    
+    let ram_value_for_draw = Rc::clone(&ram_value);
+    ram_drawing.set_draw_func(move |_, cr, width, height| {
+        let val = *ram_value_for_draw.borrow();
+        
+        cr.set_source_rgba(0.2, 0.2, 0.2, 0.3);
+        let _ = cr.rectangle(0.0, 0.0, width as f64, height as f64);
+        let _ = cr.fill();
+        
+        let bar_height = height as f64 * val;
+        let y = height as f64 - bar_height;
+        
+        cr.set_source_rgba(0.3, 0.6, 1.0, 0.8);
+        let _ = cr.rectangle(0.0, y, width as f64, bar_height);
+        let _ = cr.fill();
+        
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+        cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
+        cr.set_font_size(9.0);
+        let text = format!("{:.0}%", val * 100.0);
+        let extents = cr.text_extents(&text).unwrap();
+        let x = (width as f64 - extents.width()) / 2.0;
+        let y_pos = height as f64 / 2.0 + extents.height() / 2.0;
+        let _ = cr.move_to(x, y_pos);
+        let _ = cr.show_text(&text);
+    });
+    
+    // Network line graph drawing
+    let net_history_for_draw = Rc::clone(&net_history);
+    net_drawing.set_draw_func(move |_, cr, width, height| {
+        let history = net_history_for_draw.borrow();
+        
+        // Graph area is 80px, text area is 60px on the right
+        let graph_width = 80.0;
+        let text_x_start = graph_width + 4.0;
+        
+        // Background
+        cr.set_source_rgba(0.2, 0.2, 0.2, 0.3);
+        let _ = cr.rectangle(0.0, 0.0, width as f64, height as f64);
+        let _ = cr.fill();
+        
+        if history.len() < 2 {
+            return;
+        }
+        
+        // Find max value for scaling
+        let max_val = history.iter()
+            .flat_map(|(rx, tx)| vec![*rx, *tx])
+            .fold(0.0f64, f64::max)
+            .max(1.0); // At least 1 KB/s for scaling
+        
+        let point_width = graph_width / 60.0;
+        
+        // Draw download line (green)
+        cr.set_source_rgba(0.3, 0.8, 0.3, 0.9);
+        cr.set_line_width(1.5);
+        for (i, (rx, _)) in history.iter().enumerate() {
+            let x = i as f64 * point_width;
+            let y = height as f64 - (rx / max_val) * height as f64;
+            if i == 0 {
+                let _ = cr.move_to(x, y);
+            } else {
+                let _ = cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+        
+        // Draw upload line (blue)
+        cr.set_source_rgba(0.3, 0.5, 1.0, 0.9);
+        cr.set_line_width(1.5);
+        for (i, (_, tx)) in history.iter().enumerate() {
+            let x = i as f64 * point_width;
+            let y = height as f64 - (tx / max_val) * height as f64;
+            if i == 0 {
+                let _ = cr.move_to(x, y);
+            } else {
+                let _ = cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+        
+        // Display current speeds with arrows on the right side
+        if let Some(&(rx, tx)) = history.last() {
+            cr.set_font_size(7.0);
+            cr.select_font_face("Monospace", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Normal);
+            
+            // Upload speed (top right, blue)
+            cr.set_source_rgba(0.3, 0.5, 1.0, 0.9);
+            let tx_text = if tx >= 1024.0 {
+                format!("▲ {:.1} MB/s", tx / 1024.0)
+            } else {
+                format!("▲ {:.0} KB/s", tx)
+            };
+            let _ = cr.move_to(text_x_start, height as f64 / 2.0 - 2.0);
+            let _ = cr.show_text(&tx_text);
+            
+            // Download speed (bottom right, green)
+            cr.set_source_rgba(0.3, 0.8, 0.3, 0.9);
+            let rx_text = if rx >= 1024.0 {
+                format!("▼ {:.1} MB/s", rx / 1024.0)
+            } else {
+                format!("▼ {:.0} KB/s", rx)
+            };
+            let _ = cr.move_to(text_x_start, height as f64 - 4.0);
+            let _ = cr.show_text(&rx_text);
+        }
+    });
     
     glib::timeout_add_seconds_local(1, move || {
         sys.borrow_mut().refresh_all();
@@ -428,15 +659,15 @@ fn setup_system_monitoring(cpu_bar: &ProgressBar, ram_bar: &ProgressBar, net_tex
         
         // CPU usage
         let cpu_usage = sys_ref.global_cpu_usage();
-        cpu_bar_clone.set_fraction((cpu_usage / 100.0) as f64);
-        cpu_bar_clone.set_text(Some(&format!("{:.0}%", cpu_usage)));
+        *cpu_value.borrow_mut() = (cpu_usage / 100.0) as f64;
+        cpu_drawing_clone.queue_draw();
         
         // RAM usage
         let total_mem = sys_ref.total_memory() as f64;
         let used_mem = sys_ref.used_memory() as f64;
         let mem_percent = if total_mem > 0.0 { used_mem / total_mem } else { 0.0 };
-        ram_bar_clone.set_fraction(mem_percent);
-        ram_bar_clone.set_text(Some(&format!("{:.0}%", mem_percent * 100.0)));
+        *ram_value.borrow_mut() = mem_percent;
+        ram_drawing_clone.queue_draw();
         
         // Network usage
         let mut total_rx = 0u64;
@@ -449,15 +680,29 @@ fn setup_system_monitoring(cpu_bar: &ProgressBar, ram_bar: &ProgressBar, net_tex
         let prev_rx_val = *prev_rx.borrow();
         let prev_tx_val = *prev_tx.borrow();
         
-        let rx_rate = if total_rx >= prev_rx_val { total_rx - prev_rx_val } else { 0 };
-        let tx_rate = if total_tx >= prev_tx_val { total_tx - prev_tx_val } else { 0 };
+        let rx_speed = if prev_rx_val > 0 {
+            ((total_rx - prev_rx_val) as f64) / 1024.0 // KB/s
+        } else {
+            0.0
+        };
+        let tx_speed = if prev_tx_val > 0 {
+            ((total_tx - prev_tx_val) as f64) / 1024.0 // KB/s
+        } else {
+            0.0
+        };
         
         *prev_rx.borrow_mut() = total_rx;
         *prev_tx.borrow_mut() = total_tx;
         
-        let rx_str = format_bytes(rx_rate);
-        let tx_str = format_bytes(tx_rate);
-        net_text_clone.set_text(&format!("↓ {} ↑ {}", rx_str, tx_str));
+        // Update history buffer
+        let mut hist = net_history_clone.borrow_mut();
+        hist.push((rx_speed, tx_speed));
+        if hist.len() > 60 {
+            hist.remove(0);
+        }
+        drop(hist);
+        
+        net_drawing_clone.queue_draw();
         
         glib::ControlFlow::Continue
     });
