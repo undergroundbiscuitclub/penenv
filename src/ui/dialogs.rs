@@ -3,7 +3,7 @@
 //! Contains settings dialog, command dialogs, and other popups using libadwaita 0.7 widgets.
 
 use gtk4::prelude::*;
-use gtk4::{self as gtk, Application, Box as GtkBox, Button, Label, Orientation, Entry, 
+use gtk4::{self as gtk, Application, Box as GtkBox, Button, Label, Orientation, Entry,
           ScrolledWindow, ListBox, Frame, CheckButton, Notebook};
 use libadwaita::{self as adw, prelude::*};
 use std::path::PathBuf;
@@ -28,33 +28,33 @@ where
         .default_width(500)
         .default_height(250)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(450);
-    
+
     let dialog_box = GtkBox::new(Orientation::Vertical, 20);
     dialog_box.set_margin_top(24);
     dialog_box.set_margin_bottom(24);
     dialog_box.set_margin_start(24);
     dialog_box.set_margin_end(24);
-    
+
     // Get current directory
     let current_dir = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .to_string_lossy()
         .to_string();
-    
+
     // Header with icon
     let header_box = GtkBox::new(Orientation::Vertical, 12);
     header_box.set_halign(gtk::Align::Center);
-    
+
     let icon = gtk::Image::from_icon_name("folder-symbolic");
     icon.set_pixel_size(64);
     icon.add_css_class("dim-label");
-    
+
     let title_label = Label::new(Some("Choose Base Directory"));
     title_label.add_css_class("title-1");
-    
+
     let desc_label = Label::new(Some(&format!(
         "This directory will store your project files.\n\nCurrent: {}",
         current_dir
@@ -62,25 +62,25 @@ where
     desc_label.set_wrap(true);
     desc_label.set_justify(gtk::Justification::Center);
     desc_label.add_css_class("dim-label");
-    
+
     header_box.append(&icon);
     header_box.append(&title_label);
     header_box.append(&desc_label);
-    
+
     // Buttons
     let button_box = GtkBox::new(Orientation::Horizontal, 12);
     button_box.set_halign(gtk::Align::Center);
     button_box.set_margin_top(12);
-    
+
     let yes_btn = Button::with_label("Use Current Directory");
     yes_btn.add_css_class("suggested-action");
     yes_btn.add_css_class("pill");
-    
+
     let browse_btn = Button::with_label("Browse...");
     browse_btn.add_css_class("pill");
-    
+
     let callback_rc = Rc::new(callback);
-    
+
     // Yes button handler
     let dialog_clone = dialog.clone();
     let callback_clone = Rc::clone(&callback_rc);
@@ -89,7 +89,7 @@ where
         callback_clone(Some(PathBuf::from(&current_dir_clone)));
         dialog_clone.close();
     });
-    
+
     // Browse button handler
     let dialog_clone2 = dialog.clone();
     let callback_clone2 = Rc::clone(&callback_rc);
@@ -103,7 +103,7 @@ where
                 ("Select", gtk::ResponseType::Accept),
             ],
         );
-        
+
         let dialog_clone3 = dialog_clone2.clone();
         let callback_clone3 = Rc::clone(&callback_clone2);
         file_chooser.connect_response(move |file_chooser, response| {
@@ -117,26 +117,145 @@ where
             }
             file_chooser.close();
         });
-        
+
         file_chooser.show();
     });
-    
+
     button_box.append(&yes_btn);
     button_box.append(&browse_btn);
-    
+
     dialog_box.append(&header_box);
     dialog_box.append(&button_box);
-    
+
     content.set_child(Some(&dialog_box));
     dialog.set_content(Some(&content));
     dialog.present();
 }
 
 /// Shows the settings dialog using Notebook tabs compatible with libadwaita 0.7
+/// Creates the about page
+fn create_about_page() -> ScrolledWindow {
+    let scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(600);
+
+    let page = GtkBox::new(Orientation::Vertical, 24);
+    page.set_margin_top(24);
+    page.set_margin_bottom(24);
+    page.set_margin_start(12);
+    page.set_margin_end(12);
+    page.set_halign(gtk::Align::Center);
+
+    // App icon/name
+    let app_name = Label::new(Some("PenEnv"));
+    app_name.add_css_class("title-1");
+    app_name.set_margin_bottom(4);
+    page.append(&app_name);
+
+    // Version
+    let version = Label::new(Some("Version 1.0.3"));
+    version.add_css_class("title-4");
+    version.set_margin_bottom(24);
+    page.append(&version);
+
+    // Description
+    let description = Label::new(Some(
+        "A modern GTK4 desktop application for managing\n\
+        penetration testing environments with integrated\n\
+        shells, note-taking, and target management."
+    ));
+    description.set_justify(gtk::Justification::Center);
+    description.set_margin_bottom(24);
+    page.append(&description);
+
+    // Separator
+    let separator1 = gtk::Separator::new(Orientation::Horizontal);
+    separator1.set_margin_bottom(24);
+    page.append(&separator1);
+
+    // Built with section
+    let built_heading = Label::new(Some("Built With"));
+    built_heading.add_css_class("title-4");
+    built_heading.set_margin_bottom(12);
+    page.append(&built_heading);
+
+    let tech_box = GtkBox::new(Orientation::Vertical, 6);
+    tech_box.set_halign(gtk::Align::Center);
+
+    let tech_items = vec![
+        "GTK4 0.9 - Modern GNOME toolkit",
+        "libadwaita 0.7 - GNOME design library",
+        "VTE4 0.8 - Virtual Terminal Emulator",
+        "Rust - Systems programming language",
+    ];
+
+    for item in tech_items {
+        let label = Label::new(Some(item));
+        label.add_css_class("dim-label");
+        tech_box.append(&label);
+    }
+
+    page.append(&tech_box);
+
+    // Separator
+    let separator2 = gtk::Separator::new(Orientation::Horizontal);
+    separator2.set_margin_top(24);
+    separator2.set_margin_bottom(24);
+    page.append(&separator2);
+
+    // Author
+    let author_heading = Label::new(Some("Author"));
+    author_heading.add_css_class("title-4");
+    author_heading.set_margin_bottom(8);
+    page.append(&author_heading);
+
+    let author = Label::new(Some("undergroundbiscuitclub"));
+    author.add_css_class("dim-label");
+    author.set_margin_bottom(24);
+    page.append(&author);
+
+    // License
+    let license_heading = Label::new(Some("License"));
+    license_heading.add_css_class("title-4");
+    license_heading.set_margin_bottom(8);
+    page.append(&license_heading);
+
+    let license = Label::new(Some("MIT License"));
+    license.add_css_class("dim-label");
+    license.set_margin_bottom(24);
+    page.append(&license);
+
+    // Disclaimer
+    let disclaimer_heading = Label::new(Some("⚠️  Important"));
+    disclaimer_heading.add_css_class("title-4");
+    disclaimer_heading.set_margin_bottom(8);
+    page.append(&disclaimer_heading);
+
+    let disclaimer = Label::new(Some(
+        "This software is provided for educational purposes\n\
+        and authorized security testing only.\n\n\
+        Only use against systems you own or have\n\
+        written permission to test."
+    ));
+    disclaimer.set_justify(gtk::Justification::Center);
+    disclaimer.add_css_class("dim-label");
+    page.append(&disclaimer);
+
+    content.set_child(Some(&page));
+    scrolled.set_child(Some(&content));
+
+    scrolled
+}
+
 pub fn show_settings_dialog(
-    parent: &adw::ApplicationWindow, 
-    cpu_frame: &Frame, 
-    ram_frame: &Frame, 
+    parent: &adw::ApplicationWindow,
+    cpu_frame: &Frame,
+    ram_frame: &Frame,
     net_frame: &Frame
 ) {
     let dialog = adw::Window::builder()
@@ -146,13 +265,13 @@ pub fn show_settings_dialog(
         .default_width(600)
         .default_height(550)
         .build();
-    
+
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    
+
     // Header bar
     let header_bar = adw::HeaderBar::new();
     main_box.append(&header_bar);
-    
+
     // Create notebook for tabs (compatible with libadwaita 0.7)
     let notebook = Notebook::new();
     notebook.set_margin_top(6);
@@ -164,17 +283,22 @@ pub fn show_settings_dialog(
     let general_page = create_general_settings_page(cpu_frame, ram_frame, net_frame);
     let general_label = Label::new(Some("General"));
     notebook.append_page(&general_page, Some(&general_label));
-    
+
     // ===== SHORTCUTS TAB =====
     let shortcuts_page = create_shortcuts_page(parent);
     let shortcuts_label = Label::new(Some("Shortcuts"));
     notebook.append_page(&shortcuts_page, Some(&shortcuts_label));
-    
+
     // ===== COMMANDS TAB =====
     let commands_page = create_commands_page(parent, &dialog, cpu_frame, ram_frame, net_frame);
     let commands_label = Label::new(Some("Commands"));
     notebook.append_page(&commands_page, Some(&commands_label));
-    
+
+    // ===== ABOUT TAB =====
+    let about_page = create_about_page();
+    let about_label = Label::new(Some("About"));
+    notebook.append_page(&about_page, Some(&about_label));
+
     main_box.append(&notebook);
     dialog.set_content(Some(&main_box));
     dialog.present();
@@ -187,27 +311,27 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(500);
-    
+
     let page = GtkBox::new(Orientation::Vertical, 24);
     page.set_margin_top(24);
     page.set_margin_bottom(24);
     page.set_margin_start(12);
     page.set_margin_end(12);
-    
+
     // Monitor Settings Group
     let monitor_heading = Label::new(Some("System Monitors"));
     monitor_heading.add_css_class("title-4");
     monitor_heading.set_halign(gtk::Align::Start);
     monitor_heading.set_margin_bottom(12);
     page.append(&monitor_heading);
-    
+
     let monitor_box = GtkBox::new(Orientation::Vertical, 8);
     monitor_box.set_margin_start(12);
     monitor_box.set_margin_bottom(24);
-    
+
     // CPU toggle
     let cpu_check = CheckButton::with_label("Show CPU Monitor");
     cpu_check.set_active(cpu_frame.is_visible());
@@ -219,7 +343,7 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         let _ = save_app_settings(&settings);
     });
     monitor_box.append(&cpu_check);
-    
+
     // RAM toggle
     let ram_check = CheckButton::with_label("Show RAM Monitor");
     ram_check.set_active(ram_frame.is_visible());
@@ -231,7 +355,7 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         let _ = save_app_settings(&settings);
     });
     monitor_box.append(&ram_check);
-    
+
     // Network toggle
     let net_check = CheckButton::with_label("Show Network Monitor");
     net_check.set_active(net_frame.is_visible());
@@ -243,20 +367,20 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         let _ = save_app_settings(&settings);
     });
     monitor_box.append(&net_check);
-    
+
     page.append(&monitor_box);
-    
+
     // Logging Group
     let logging_heading = Label::new(Some("Command Logging"));
     logging_heading.add_css_class("title-4");
     logging_heading.set_halign(gtk::Align::Start);
     logging_heading.set_margin_bottom(12);
     page.append(&logging_heading);
-    
+
     let logging_box = GtkBox::new(Orientation::Vertical, 8);
     logging_box.set_margin_start(12);
     logging_box.set_margin_bottom(24);
-    
+
     let logging_check = CheckButton::with_label("Enable Command Logging (requires restart)");
     logging_check.set_active(is_command_logging_enabled());
     logging_check.connect_toggled(move |check| {
@@ -265,27 +389,27 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         let _ = save_app_settings(&settings);
     });
     logging_box.append(&logging_check);
-    
+
     page.append(&logging_box);
-    
+
     // Terminal Group
     let terminal_heading = Label::new(Some("Terminal Settings"));
     terminal_heading.add_css_class("title-4");
     terminal_heading.set_halign(gtk::Align::Start);
     terminal_heading.set_margin_bottom(12);
     page.append(&terminal_heading);
-    
+
     let terminal_box = GtkBox::new(Orientation::Vertical, 12);
     terminal_box.set_margin_start(12);
     terminal_box.set_margin_bottom(24);
-    
+
     // Terminal scrollback lines
     let scrollback_box = GtkBox::new(Orientation::Horizontal, 12);
     let scrollback_label = Label::new(Some("Terminal History Lines:"));
     scrollback_label.set_xalign(0.0);
     scrollback_label.set_hexpand(true);
     scrollback_box.append(&scrollback_label);
-    
+
     let scrollback_spin = gtk::SpinButton::with_range(100.0, 100000.0, 100.0);
     scrollback_spin.set_value(get_app_settings().terminal_scrollback_lines as f64);
     scrollback_spin.set_digits(0);
@@ -295,27 +419,27 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
         let _ = save_app_settings(&settings);
     });
     scrollback_box.append(&scrollback_spin);
-    
+
     terminal_box.append(&scrollback_box);
     page.append(&terminal_box);
-    
+
     // Zoom Group
     let zoom_heading = Label::new(Some("Zoom Settings"));
     zoom_heading.add_css_class("title-4");
     zoom_heading.set_halign(gtk::Align::Start);
     zoom_heading.set_margin_bottom(12);
     page.append(&zoom_heading);
-    
+
     let zoom_box = GtkBox::new(Orientation::Vertical, 12);
     zoom_box.set_margin_start(12);
     zoom_box.set_margin_bottom(24);
-    
+
     // Text zoom
     let text_zoom_box = GtkBox::new(Orientation::Horizontal, 12);
     let text_zoom_label = Label::new(Some("Text Zoom:"));
     text_zoom_label.set_width_request(120);
     text_zoom_label.set_halign(gtk::Align::Start);
-    
+
     let text_scale = gtk::Scale::with_range(Orientation::Horizontal, zoom::MIN_SCALE, zoom::MAX_SCALE, 0.1);
     text_scale.set_value(get_text_zoom_scale());
     text_scale.set_hexpand(true);
@@ -323,25 +447,25 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
     text_scale.connect_value_changed(|scale| {
         crate::ui::editor::set_text_zoom_scale(scale.value());
     });
-    
+
     let text_reset_btn = Button::with_label("Reset");
     text_reset_btn.add_css_class("flat");
     let text_scale_clone = text_scale.clone();
     text_reset_btn.connect_clicked(move |_| {
         text_scale_clone.set_value(zoom::DEFAULT_SCALE);
     });
-    
+
     text_zoom_box.append(&text_zoom_label);
     text_zoom_box.append(&text_scale);
     text_zoom_box.append(&text_reset_btn);
     zoom_box.append(&text_zoom_box);
-    
+
     // Terminal zoom
     let terminal_zoom_box = GtkBox::new(Orientation::Horizontal, 12);
     let terminal_zoom_label = Label::new(Some("Terminal Zoom:"));
     terminal_zoom_label.set_width_request(120);
     terminal_zoom_label.set_halign(gtk::Align::Start);
-    
+
     let terminal_scale = gtk::Scale::with_range(Orientation::Horizontal, zoom::MIN_SCALE, zoom::MAX_SCALE, 0.1);
     terminal_scale.set_value(get_terminal_zoom_scale());
     terminal_scale.set_hexpand(true);
@@ -349,29 +473,29 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
     terminal_scale.connect_value_changed(|scale| {
         crate::ui::terminal::set_terminal_zoom_scale(scale.value());
     });
-    
+
     let terminal_reset_btn = Button::with_label("Reset");
     terminal_reset_btn.add_css_class("flat");
     let terminal_scale_clone = terminal_scale.clone();
     terminal_reset_btn.connect_clicked(move |_| {
         terminal_scale_clone.set_value(zoom::DEFAULT_SCALE);
     });
-    
+
     terminal_zoom_box.append(&terminal_zoom_label);
     terminal_zoom_box.append(&terminal_scale);
     terminal_zoom_box.append(&terminal_reset_btn);
     zoom_box.append(&terminal_zoom_box);
-    
+
     let zoom_hint = Label::new(Some("Tip: Use Ctrl+Scroll for quick zoom"));
     zoom_hint.add_css_class("dim-label");
     zoom_hint.set_halign(gtk::Align::Start);
     zoom_box.append(&zoom_hint);
-    
+
     page.append(&zoom_box);
-    
+
     content.set_child(Some(&page));
     scrolled.set_child(Some(&content));
-    
+
     scrolled
 }
 
@@ -382,28 +506,28 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(500);
-    
+
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(24);
     page.set_margin_bottom(24);
     page.set_margin_start(12);
     page.set_margin_end(12);
-    
+
     let shortcuts = get_keyboard_shortcuts();
-    
+
     let shortcuts_heading = Label::new(Some("Keyboard Shortcuts"));
     shortcuts_heading.add_css_class("title-4");
     shortcuts_heading.set_halign(gtk::Align::Start);
     shortcuts_heading.set_margin_bottom(12);
     page.append(&shortcuts_heading);
-    
+
     let list_box = ListBox::new();
     list_box.set_selection_mode(gtk::SelectionMode::None);
     list_box.add_css_class("boxed-list");
-    
+
     // Toggle drawer shortcut
     let drawer_row = create_shortcut_row(
         "Toggle Command Drawer",
@@ -413,7 +537,7 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         false,
     );
     list_box.append(&drawer_row);
-    
+
     // Insert target shortcut
     let target_row = create_shortcut_row(
         "Insert Target",
@@ -423,7 +547,7 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         false,
     );
     list_box.append(&target_row);
-    
+
     // Insert timestamp shortcut
     let timestamp_row = create_shortcut_row(
         "Insert Timestamp",
@@ -433,7 +557,7 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         true,
     );
     list_box.append(&timestamp_row);
-    
+
     // New shell shortcut
     let new_shell_text = shortcuts.new_shell
         .as_ref()
@@ -447,7 +571,7 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         true,
     );
     list_box.append(&new_shell_row);
-    
+
     // New split shortcut
     let new_split_text = shortcuts.new_split
         .as_ref()
@@ -461,12 +585,12 @@ fn create_shortcuts_page(parent: &adw::ApplicationWindow) -> ScrolledWindow {
         true,
     );
     list_box.append(&new_split_row);
-    
+
     page.append(&list_box);
-    
+
     content.set_child(Some(&page));
     scrolled.set_child(Some(&content));
-    
+
     scrolled
 }
 
@@ -479,21 +603,21 @@ fn create_shortcut_row(
     _requires_shift: bool,
 ) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
-    
+
     let row_box = GtkBox::new(Orientation::Horizontal, 12);
     row_box.set_margin_top(8);
     row_box.set_margin_bottom(8);
     row_box.set_margin_start(12);
     row_box.set_margin_end(12);
-    
+
     let title_label = Label::new(Some(title));
     title_label.set_hexpand(true);
     title_label.set_halign(gtk::Align::Start);
-    
+
     let shortcut_label = Label::new(Some(current_value));
     shortcut_label.add_css_class("dim-label");
     shortcut_label.add_css_class("numeric");
-    
+
     let change_btn = Button::with_label("Change");
     change_btn.add_css_class("flat");
     let parent_clone = parent.clone();
@@ -502,7 +626,7 @@ fn create_shortcut_row(
     change_btn.connect_clicked(move |_| {
         show_key_capture_dialog(&parent_clone, &shortcut_name_owned, &shortcut_label_clone);
     });
-    
+
     let clear_btn = Button::builder()
         .icon_name("edit-clear-symbolic")
         .tooltip_text("Clear shortcut")
@@ -523,12 +647,12 @@ fn create_shortcut_row(
         let _ = save_app_settings(&settings);
         shortcut_label_clone2.set_text("Not assigned");
     });
-    
+
     row_box.append(&title_label);
     row_box.append(&shortcut_label);
     row_box.append(&change_btn);
     row_box.append(&clear_btn);
-    
+
     row.set_child(Some(&row_box));
     row
 }
@@ -542,54 +666,54 @@ fn show_key_capture_dialog(parent: &adw::ApplicationWindow, shortcut_name: &str,
         .default_width(350)
         .default_height(180)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(300);
-    
+
     let dialog_box = GtkBox::new(Orientation::Vertical, 16);
     dialog_box.set_margin_top(24);
     dialog_box.set_margin_bottom(24);
     dialog_box.set_margin_start(24);
     dialog_box.set_margin_end(24);
     dialog_box.set_halign(gtk::Align::Center);
-    
+
     let info = Label::new(Some("Press Ctrl + any key"));
     info.set_wrap(true);
     info.add_css_class("dim-label");
-    
+
     let current_key = Label::new(Some("Waiting for key..."));
     current_key.add_css_class("title-2");
-    
+
     let cancel_btn = Button::with_label("Cancel");
     cancel_btn.set_halign(gtk::Align::Center);
     let dialog_clone = dialog.clone();
     cancel_btn.connect_clicked(move |_| {
         dialog_clone.close();
     });
-    
+
     dialog_box.append(&info);
     dialog_box.append(&current_key);
     dialog_box.append(&cancel_btn);
-    
+
     // Keyboard handler
     let key_controller = gtk::EventControllerKey::new();
     let shortcut_name_owned = shortcut_name.to_string();
     let display_label_clone = display_label.clone();
     let dialog_clone2 = dialog.clone();
     let current_key_clone = current_key.clone();
-    
+
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             let key_name = keyval.name().unwrap_or_default().to_string();
             let has_shift = modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-            
+
             let display_text = if has_shift {
                 format!("Ctrl+Shift+{}", key_to_display(&key_name))
             } else {
                 format!("Ctrl+{}", key_to_display(&key_name))
             };
             current_key_clone.set_text(&display_text);
-            
+
             // Save the shortcut
             let mut settings = get_app_settings();
             match shortcut_name_owned.as_str() {
@@ -600,22 +724,22 @@ fn show_key_capture_dialog(parent: &adw::ApplicationWindow, shortcut_name: &str,
                 "new_split" => settings.keyboard_shortcuts.new_split = Some(key_name.clone()),
                 _ => {}
             }
-            
+
             if save_app_settings(&settings).is_ok() {
                 display_label_clone.set_text(&display_text);
-                
+
                 // Close after delay
                 let dialog = dialog_clone2.clone();
                 gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
                     dialog.close();
                 });
             }
-            
+
             return gtk::glib::Propagation::Stop;
         }
         gtk::glib::Propagation::Proceed
     });
-    
+
     content.set_child(Some(&dialog_box));
     dialog.set_content(Some(&content));
     dialog.add_controller(key_controller);
@@ -635,39 +759,39 @@ fn create_commands_page(
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(500);
-    
+
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(24);
     page.set_margin_bottom(24);
     page.set_margin_start(12);
     page.set_margin_end(12);
-    
+
     let commands_heading = Label::new(Some("Custom Commands"));
     commands_heading.add_css_class("title-4");
     commands_heading.set_halign(gtk::Align::Start);
     commands_heading.set_margin_bottom(12);
     page.append(&commands_heading);
-    
+
     let inner_box = GtkBox::new(Orientation::Vertical, 8);
     inner_box.set_margin_start(12);
-    
+
     let hint_label = Label::new(Some("Add your own command templates. Use {target} as placeholder."));
     hint_label.add_css_class("dim-label");
     hint_label.set_halign(gtk::Align::Start);
     hint_label.set_wrap(true);
     inner_box.append(&hint_label);
-    
+
     // Commands list
     let list_box = ListBox::new();
     list_box.set_selection_mode(gtk::SelectionMode::None);
     list_box.add_css_class("boxed-list");
     list_box.set_margin_top(12);
-    
+
     let commands = load_custom_commands();
-    
+
     if commands.is_empty() {
         let empty_row = gtk::ListBoxRow::new();
         let empty_label = Label::new(Some("No custom commands yet"));
@@ -684,28 +808,28 @@ fn create_commands_page(
             row_box.set_margin_bottom(8);
             row_box.set_margin_start(12);
             row_box.set_margin_end(12);
-            
+
             let info_box = GtkBox::new(Orientation::Vertical, 2);
             info_box.set_hexpand(true);
-            
+
             let name_label = Label::new(Some(&cmd.name));
             name_label.set_halign(gtk::Align::Start);
             name_label.add_css_class("heading");
-            
+
             let cmd_label = Label::new(Some(&cmd.command));
             cmd_label.set_halign(gtk::Align::Start);
             cmd_label.add_css_class("dim-label");
             cmd_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            
+
             info_box.append(&name_label);
             info_box.append(&cmd_label);
-            
+
             let edit_btn = Button::builder()
                 .icon_name("document-edit-symbolic")
                 .tooltip_text("Edit")
                 .build();
             edit_btn.add_css_class("flat");
-            
+
             let parent_clone = parent.clone();
             let dialog_clone = settings_dialog.clone();
             let cpu_clone = cpu_frame.clone();
@@ -723,14 +847,14 @@ fn create_commands_page(
                     show_settings_dialog(&parent_ref, &cpu_ref, &ram_ref, &net_ref);
                 });
             });
-            
+
             let delete_btn = Button::builder()
                 .icon_name("user-trash-symbolic")
                 .tooltip_text("Delete")
                 .build();
             delete_btn.add_css_class("flat");
             delete_btn.add_css_class("error");
-            
+
             let parent_clone2 = parent.clone();
             let dialog_clone2 = settings_dialog.clone();
             let cpu_clone2 = cpu_frame.clone();
@@ -742,25 +866,25 @@ fn create_commands_page(
                     show_settings_dialog(&parent_clone2, &cpu_clone2, &ram_clone2, &net_clone2);
                 }
             });
-            
+
             row_box.append(&info_box);
             row_box.append(&edit_btn);
             row_box.append(&delete_btn);
-            
+
             row.set_child(Some(&row_box));
             list_box.append(&row);
         }
     }
-    
+
     inner_box.append(&list_box);
-    
+
     // Add button
     let add_btn = Button::with_label("Add Command");
     add_btn.add_css_class("suggested-action");
     add_btn.add_css_class("pill");
     add_btn.set_halign(gtk::Align::Center);
     add_btn.set_margin_top(12);
-    
+
     let parent_clone = parent.clone();
     let dialog_clone = settings_dialog.clone();
     let cpu_clone = cpu_frame.clone();
@@ -777,13 +901,13 @@ fn create_commands_page(
             show_settings_dialog(&parent_ref, &cpu_ref, &ram_ref, &net_ref);
         });
     });
-    
+
     inner_box.append(&add_btn);
     page.append(&inner_box);
-    
+
     content.set_child(Some(&page));
     scrolled.set_child(Some(&content));
-    
+
     scrolled
 }
 
@@ -799,21 +923,21 @@ where
         .default_width(450)
         .default_height(400)
         .build();
-    
+
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    
+
     let header = adw::HeaderBar::new();
     main_box.append(&header);
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(400);
-    
+
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(24);
     page.set_margin_bottom(24);
     page.set_margin_start(12);
     page.set_margin_end(12);
-    
+
     // Name entry
     let name_box = GtkBox::new(Orientation::Vertical, 4);
     let name_label = Label::new(Some("Name"));
@@ -823,7 +947,7 @@ where
     name_box.append(&name_label);
     name_box.append(&name_entry);
     page.append(&name_box);
-    
+
     // Command entry
     let command_box = GtkBox::new(Orientation::Vertical, 4);
     let command_label = Label::new(Some("Command"));
@@ -833,7 +957,7 @@ where
     command_box.append(&command_label);
     command_box.append(&command_entry);
     page.append(&command_box);
-    
+
     // Description entry
     let desc_box = GtkBox::new(Orientation::Vertical, 4);
     let desc_label = Label::new(Some("Description"));
@@ -843,7 +967,7 @@ where
     desc_box.append(&desc_label);
     desc_box.append(&desc_entry);
     page.append(&desc_box);
-    
+
     // Category entry
     let cat_box = GtkBox::new(Orientation::Vertical, 4);
     let cat_label = Label::new(Some("Category"));
@@ -853,25 +977,25 @@ where
     cat_box.append(&cat_label);
     cat_box.append(&cat_entry);
     page.append(&cat_box);
-    
+
     // Tip
     let tip_label = Label::new(Some("💡 Use {target} as a placeholder for target selection"));
     tip_label.add_css_class("dim-label");
     tip_label.set_wrap(true);
     tip_label.set_margin_top(12);
     page.append(&tip_label);
-    
+
     // Buttons
     let button_box = GtkBox::new(Orientation::Horizontal, 12);
     button_box.set_halign(gtk::Align::End);
     button_box.set_margin_top(24);
-    
+
     let cancel_btn = Button::with_label("Cancel");
     let dialog_clone = dialog.clone();
     cancel_btn.connect_clicked(move |_| {
         dialog_clone.close();
     });
-    
+
     let save_btn = Button::with_label("Save");
     save_btn.add_css_class("suggested-action");
     let dialog_clone2 = dialog.clone();
@@ -884,29 +1008,29 @@ where
         let command = command_entry_clone.text().to_string();
         let description = desc_entry_clone.text().to_string();
         let category = cat_entry_clone.text().to_string();
-        
+
         if name.is_empty() || command.is_empty() {
             log::warn!("Name and command are required");
             return;
         }
-        
+
         let cmd_template = CommandTemplate {
             name,
             command,
             description: if description.is_empty() { "Custom command".to_string() } else { description },
             category: if category.is_empty() { "Custom".to_string() } else { category },
         };
-        
+
         if save_custom_command(cmd_template).is_ok() {
             on_save();
             dialog_clone2.close();
         }
     });
-    
+
     button_box.append(&cancel_btn);
     button_box.append(&save_btn);
     page.append(&button_box);
-    
+
     content.set_child(Some(&page));
     main_box.append(&content);
     dialog.set_content(Some(&main_box));
@@ -925,21 +1049,21 @@ where
         .default_width(450)
         .default_height(400)
         .build();
-    
+
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    
+
     let header = adw::HeaderBar::new();
     main_box.append(&header);
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(400);
-    
+
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(24);
     page.set_margin_bottom(24);
     page.set_margin_start(12);
     page.set_margin_end(12);
-    
+
     // Name entry
     let name_box = GtkBox::new(Orientation::Vertical, 4);
     let name_label = Label::new(Some("Name"));
@@ -949,7 +1073,7 @@ where
     name_box.append(&name_label);
     name_box.append(&name_entry);
     page.append(&name_box);
-    
+
     // Command entry
     let command_box = GtkBox::new(Orientation::Vertical, 4);
     let command_label = Label::new(Some("Command"));
@@ -959,7 +1083,7 @@ where
     command_box.append(&command_label);
     command_box.append(&command_entry);
     page.append(&command_box);
-    
+
     // Description entry
     let desc_box = GtkBox::new(Orientation::Vertical, 4);
     let desc_label = Label::new(Some("Description"));
@@ -969,7 +1093,7 @@ where
     desc_box.append(&desc_label);
     desc_box.append(&desc_entry);
     page.append(&desc_box);
-    
+
     // Category entry
     let cat_box = GtkBox::new(Orientation::Vertical, 4);
     let cat_label = Label::new(Some("Category"));
@@ -979,18 +1103,18 @@ where
     cat_box.append(&cat_label);
     cat_box.append(&cat_entry);
     page.append(&cat_box);
-    
+
     // Buttons
     let button_box = GtkBox::new(Orientation::Horizontal, 12);
     button_box.set_halign(gtk::Align::End);
     button_box.set_margin_top(24);
-    
+
     let cancel_btn = Button::with_label("Cancel");
     let dialog_clone = dialog.clone();
     cancel_btn.connect_clicked(move |_| {
         dialog_clone.close();
     });
-    
+
     let save_btn = Button::with_label("Save");
     save_btn.add_css_class("suggested-action");
     let dialog_clone2 = dialog.clone();
@@ -1003,29 +1127,29 @@ where
         let command = command_entry_clone.text().to_string();
         let description = desc_entry_clone.text().to_string();
         let category = cat_entry_clone.text().to_string();
-        
+
         if name.is_empty() || command.is_empty() {
             log::warn!("Name and command are required");
             return;
         }
-        
+
         let cmd_template = CommandTemplate {
             name,
             command,
             description: if description.is_empty() { "Custom command".to_string() } else { description },
             category: if category.is_empty() { "Custom".to_string() } else { category },
         };
-        
+
         if update_custom_command(index, cmd_template).is_ok() {
             on_save();
             dialog_clone2.close();
         }
     });
-    
+
     button_box.append(&cancel_btn);
     button_box.append(&save_btn);
     page.append(&button_box);
-    
+
     content.set_child(Some(&page));
     main_box.append(&content);
     dialog.set_content(Some(&main_box));
