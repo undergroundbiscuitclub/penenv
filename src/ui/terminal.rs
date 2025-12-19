@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::config::{
     get_file_path, get_app_settings, save_app_settings, get_keyboard_shortcuts,
     get_terminal_zoom_scale, set_terminal_zoom_scale_raw, load_targets,
-    is_command_logging_enabled, zoom, tabs,
+    is_command_logging_enabled, zoom, tabs, get_base_dir,
 };
 use crate::commands::load_command_templates;
 use crate::ui::editor::apply_markdown_highlighting;
@@ -29,14 +29,14 @@ thread_local! {
 pub fn set_terminal_zoom_scale(scale: f64) {
     let clamped = scale.clamp(zoom::MIN_SCALE, zoom::MAX_SCALE);
     set_terminal_zoom_scale_raw(clamped);
-    
+
     TERMINALS.with(|terminals| {
         let terminals = terminals.borrow();
         for terminal in terminals.iter() {
             terminal.set_font_scale(clamped);
         }
     });
-    
+
     let mut settings = get_app_settings();
     settings.terminal_zoom_scale = Some(clamped);
     let _ = save_app_settings(&settings);
@@ -47,13 +47,13 @@ fn add_terminal_scroll_zoom(terminal: &Terminal) {
     TERMINALS.with(|terminals| {
         terminals.borrow_mut().push(terminal.clone());
     });
-    
+
     let current_scale = get_terminal_zoom_scale();
     terminal.set_font_scale(current_scale);
-    
+
     let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     let scroll_controller_clone = scroll_controller.clone();
-    
+
     scroll_controller.connect_scroll(move |_, _, dy| {
         let modifiers = scroll_controller_clone.current_event_state();
         if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
@@ -68,7 +68,7 @@ fn add_terminal_scroll_zoom(terminal: &Terminal) {
         }
         gtk::glib::Propagation::Proceed
     });
-    
+
     terminal.add_controller(scroll_controller);
 }
 
@@ -76,10 +76,10 @@ fn add_terminal_scroll_zoom(terminal: &Terminal) {
 pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> GtkBox {
     let tab_box = GtkBox::new(Orientation::Horizontal, 4);
     let label = Label::new(Some(initial_text));
-    
+
     let gesture = gtk::GestureClick::new();
     gesture.set_button(1);
-    
+
     let label_clone = label.clone();
     gesture.connect_released(move |_gesture, n_press, _, _| {
         if n_press == 2 {
@@ -88,25 +88,25 @@ pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> Gt
                 .modal(true)
                 .resizable(false)
                 .build();
-            
+
             let dialog_box = GtkBox::new(Orientation::Vertical, 8);
             dialog_box.set_margin_top(8);
             dialog_box.set_margin_bottom(8);
             dialog_box.set_margin_start(12);
             dialog_box.set_margin_end(12);
-            
+
             let entry = gtk::Entry::new();
             entry.set_text(&label_clone.text());
             entry.set_activates_default(true);
-            
+
             let button_box = GtkBox::new(Orientation::Horizontal, 8);
             button_box.set_halign(gtk::Align::End);
-            
+
             let ok_btn = Button::with_label("OK");
             ok_btn.add_css_class("suggested-action");
             ok_btn.set_receives_default(true);
             let cancel_btn = Button::with_label("Cancel");
-            
+
             let dialog_clone = dialog.clone();
             let label_clone2 = label_clone.clone();
             let entry_clone = entry.clone();
@@ -117,26 +117,26 @@ pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> Gt
                 }
                 dialog_clone.close();
             });
-            
+
             let dialog_clone2 = dialog.clone();
             cancel_btn.connect_clicked(move |_| {
                 dialog_clone2.close();
             });
-            
+
             button_box.append(&cancel_btn);
             button_box.append(&ok_btn);
-            
+
             dialog_box.append(&entry);
             dialog_box.append(&button_box);
-            
+
             dialog.set_child(Some(&dialog_box));
             dialog.present();
         }
     });
-    
+
     label.add_controller(gesture);
     tab_box.append(&label);
-    
+
     // Add close button to tab
     let close_btn = Button::builder()
         .icon_name("window-close-symbolic")
@@ -144,7 +144,7 @@ pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> Gt
     close_btn.add_css_class("flat");
     close_btn.add_css_class("small-button");
     close_btn.set_has_frame(false);
-    
+
     let close_btn_clone = close_btn.clone();
     let notebook_clone = _notebook.clone();
     close_btn.connect_clicked(move |_| {
@@ -157,10 +157,10 @@ pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> Gt
                         if let Some(tab_label) = notebook.tab_label(&page) {
                             if tab_label == tab_box.clone().upcast::<gtk::Widget>() {
                                 // Don't close first 3 tabs (targets, notes, log)
-                                let min_tabs = if is_command_logging_enabled() { 
-                                    tabs::FIRST_SHELL 
-                                } else { 
-                                    tabs::LOG 
+                                let min_tabs = if is_command_logging_enabled() {
+                                    tabs::FIRST_SHELL
+                                } else {
+                                    tabs::LOG
                                 };
                                 if i >= min_tabs {
                                     notebook.remove_page(Some(i));
@@ -173,9 +173,9 @@ pub fn create_editable_tab_label(initial_text: &str, _notebook: &Notebook) -> Gt
             }
         }
     });
-    
+
     tab_box.append(&close_btn);
-    
+
     tab_box
 }
 
@@ -196,10 +196,10 @@ pub fn create_shell_tab(
     // Target selector bar
     let target_box = GtkBox::new(Orientation::Horizontal, 6);
     target_box.set_margin_bottom(6);
-    
+
     let target_combo = gtk::ComboBoxText::new();
     target_combo.set_hexpand(true);
-    
+
     let targets = load_targets();
     for target in &targets {
         target_combo.append_text(target);
@@ -213,24 +213,24 @@ pub fn create_shell_tab(
         .tooltip_text("Insert Target (Ctrl+T)")
         .build();
     insert_target_btn.add_css_class("flat");
-    
+
     let drawer_toggle = gtk::ToggleButton::builder()
         .icon_name("view-list-symbolic")
         .tooltip_text("Commands (Ctrl+`)")
         .build();
     drawer_toggle.add_css_class("flat");
-    
+
     // Paned layout for terminal and drawer
     let paned = Paned::new(Orientation::Horizontal);
-    
+
     // Terminal container
     let terminal_container = GtkBox::new(Orientation::Vertical, 0);
-    
+
     let terminal = Terminal::new();
     terminal.set_vexpand(true);
-    
+
     add_terminal_scroll_zoom(&terminal);
-    
+
     // Build environment
     let mut env_vars = vec![
         format!("HOME={}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
@@ -239,7 +239,7 @@ pub fn create_shell_tab(
         format!("TERM={}", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string())),
         format!("SHELL={}", std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())),
     ];
-    
+
     // Add command logging via PROMPT_COMMAND if enabled (globally and for this shell)
     if enable_logging && is_command_logging_enabled() {
         let log_file = get_file_path("commands.log").to_string_lossy().to_string();
@@ -249,15 +249,19 @@ pub fn create_shell_tab(
         );
         env_vars.insert(0, format!("PROMPT_COMMAND={}", prompt_cmd));
     }
-    
+
     let env_refs: Vec<&str> = env_vars.iter().map(|s| s.as_str()).collect();
-    
+
     // Configure terminal scrollback
     terminal.set_scrollback_lines(crate::config::get_app_settings().terminal_scrollback_lines);
-    
+
+    // Get the base directory to set as working directory
+    let working_dir = get_base_dir();
+    let working_dir_str = working_dir.to_str();
+
     let _ = terminal.spawn_async(
         vte4::PtyFlags::DEFAULT,
-        None,
+        working_dir_str,
         &["/bin/bash"],
         &env_refs,
         gtk::glib::SpawnFlags::DEFAULT,
@@ -270,13 +274,13 @@ pub fn create_shell_tab(
             }
         },
     );
-    
+
     terminal_container.append(&terminal);
-    
+
     // Create command drawer
     let (drawer, search_entry) = create_command_drawer(&terminal, &drawer_toggle, &paned);
     drawer.set_visible(false);
-    
+
     paned.set_start_child(Some(&terminal_container));
     paned.set_end_child(Some(&drawer));
     paned.set_position(10000);
@@ -319,7 +323,7 @@ pub fn create_shell_tab(
     target_box.append(&target_combo);
     target_box.append(&insert_target_btn);
     target_box.append(&drawer_toggle);
-    
+
     // Terminal keyboard shortcuts
     setup_terminal_keyboard(
         &terminal,
@@ -351,12 +355,12 @@ fn setup_terminal_keyboard(
     let drawer_toggle_clone = drawer_toggle.clone();
     let search_entry_clone = search_entry.clone();
     let shell_counter_clone = shell_counter.clone();
-    
+
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             let shortcuts = get_keyboard_shortcuts();
             let key_name = keyval.name().unwrap_or_default().to_string();
-            
+
             // Ctrl+Shift combinations
             if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
                 if let Some(ref new_shell_key) = shortcuts.new_shell {
@@ -368,7 +372,7 @@ fn setup_terminal_keyboard(
                     }
                 }
             }
-            
+
             // Toggle drawer
             if key_name == shortcuts.toggle_drawer {
                 drawer_toggle_clone.set_active(!drawer_toggle_clone.is_active());
@@ -377,13 +381,13 @@ fn setup_terminal_keyboard(
                 }
                 return gtk::glib::Propagation::Stop;
             }
-            
+
             // Insert target
             if key_name == shortcuts.insert_target {
                 show_target_selector_popup(&terminal_clone);
                 return gtk::glib::Propagation::Stop;
             }
-            
+
             // Tab switching
             let page_num = match keyval {
                 gtk::gdk::Key::_1 => Some(0),
@@ -397,7 +401,7 @@ fn setup_terminal_keyboard(
                 gtk::gdk::Key::_9 => Some(8),
                 _ => None,
             };
-            
+
             if let Some(page) = page_num {
                 if page < notebook_clone.n_pages() {
                     notebook_clone.set_current_page(Some(page));
@@ -439,27 +443,27 @@ fn setup_terminal_keyboard(
         let menu_model = gtk::gio::Menu::new();
         menu_model.append(Some("Copy"), Some("terminal.copy"));
         menu_model.append(Some("Paste"), Some("terminal.paste"));
-        
+
         let menu = gtk::PopoverMenu::from_model(Some(&menu_model));
         menu.set_parent(&terminal_clone3);
         menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        
+
         let actions = gtk::gio::SimpleActionGroup::new();
-        
+
         let copy_action = gtk::gio::SimpleAction::new("copy", None);
         let terminal_copy = terminal_clone3.clone();
         copy_action.connect_activate(move |_, _| {
             terminal_copy.copy_clipboard_format(vte4::Format::Text);
         });
         actions.add_action(&copy_action);
-        
+
         let paste_action = gtk::gio::SimpleAction::new("paste", None);
         let terminal_paste = terminal_clone3.clone();
         paste_action.connect_activate(move |_, _| {
             terminal_paste.paste_clipboard();
         });
         actions.add_action(&paste_action);
-        
+
         terminal_clone3.insert_action_group("terminal", Some(&actions));
         menu.popup();
     });
@@ -474,42 +478,42 @@ fn create_command_drawer(
 ) -> (GtkBox, gtk::SearchEntry) {
     let drawer = GtkBox::new(Orientation::Vertical, 0);
     drawer.set_width_request(320);
-    
+
     // Search box
     let search_box = GtkBox::new(Orientation::Horizontal, 0);
     search_box.set_margin_top(8);
     search_box.set_margin_bottom(8);
     search_box.set_margin_start(8);
     search_box.set_margin_end(8);
-    
+
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_placeholder_text(Some("Search commands..."));
     search_entry.set_hexpand(true);
-    
+
     search_box.append(&search_entry);
-    
+
     let scrolled = ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .build();
-    
+
     let list_box = gtk::ListBox::new();
     list_box.set_selection_mode(gtk::SelectionMode::Single);
     list_box.add_css_class("boxed-list");
-    
+
     let commands = Rc::new(load_command_templates());
     let commands_clone = Rc::clone(&commands);
-    
+
     // Populate commands
     let mut category_widgets: HashMap<String, gtk::ListBoxRow> = HashMap::new();
-    
+
     for (idx, cmd) in commands.iter().enumerate() {
         if !category_widgets.contains_key(&cmd.category) {
             let category_row = gtk::ListBoxRow::new();
             category_row.set_selectable(false);
             category_row.set_activatable(false);
-            
+
             let category_label = Label::new(Some(&cmd.category));
             category_label.set_halign(gtk::Align::Start);
             category_label.set_margin_start(12);
@@ -517,28 +521,28 @@ fn create_command_drawer(
             category_label.set_margin_bottom(8);
             category_label.add_css_class("heading");
             category_label.add_css_class("dim-label");
-            
+
             category_row.set_child(Some(&category_label));
             list_box.append(&category_row);
             category_widgets.insert(cmd.category.clone(), category_row);
         }
-        
+
         let row = adw::ActionRow::new();
         row.set_title(&cmd.name);
         row.set_subtitle(&cmd.description);
         row.set_activatable(true);
         row.set_tooltip_text(Some(&format!("{}\n\nCommand: {}", cmd.description, cmd.command)));
         row.set_widget_name(&format!("cmd_{}", idx));
-        
+
         // Use a wrapper ListBoxRow
         let list_row = gtk::ListBoxRow::new();
         list_row.set_child(Some(&row));
         list_row.set_widget_name(&format!("cmd_{}", idx));
         list_box.append(&list_row);
     }
-    
+
     scrolled.set_child(Some(&list_box));
-    
+
     // Handle command selection
     let terminal_clone = terminal.clone();
     let commands_clone2 = Rc::clone(&commands_clone);
@@ -556,23 +560,23 @@ fn create_command_drawer(
                         terminal_clone.feed_child(b" ");
                         terminal_clone.grab_focus();
                     }
-                    
+
                     drawer_toggle_clone.set_active(false);
                     paned_clone.set_position(10000);
                 }
             }
         }
     });
-    
+
     // Search functionality
     let list_box_clone = list_box.clone();
     let commands_clone3 = Rc::clone(&commands_clone);
     search_entry.connect_search_changed(move |entry| {
         let search_text = entry.text().to_lowercase();
         let is_searching = !search_text.is_empty();
-        
+
         let mut visible_categories: HashSet<String> = HashSet::new();
-        
+
         if is_searching {
             for cmd in commands_clone3.iter() {
                 let matches = cmd.name.to_lowercase().contains(&search_text)
@@ -584,12 +588,12 @@ fn create_command_drawer(
                 }
             }
         }
-        
+
         let mut child = list_box_clone.first_child();
         while let Some(row) = child {
             if let Some(list_row) = row.downcast_ref::<gtk::ListBoxRow>() {
                 let name = list_row.widget_name();
-                
+
                 if let Some(idx_str) = name.strip_prefix("cmd_") {
                     if let Ok(idx) = idx_str.parse::<usize>() {
                         if let Some(cmd) = commands_clone3.get(idx) {
@@ -620,7 +624,7 @@ fn create_command_drawer(
             child = row.next_sibling();
         }
     });
-    
+
     // Keyboard navigation in search
     let search_key_controller = gtk::EventControllerKey::new();
     let list_box_clone2 = list_box.clone();
@@ -660,10 +664,10 @@ fn create_command_drawer(
         gtk::glib::Propagation::Proceed
     });
     search_entry.add_controller(search_key_controller);
-    
+
     drawer.append(&search_box);
     drawer.append(&scrolled);
-    
+
     (drawer, search_entry)
 }
 
@@ -679,10 +683,10 @@ pub fn create_split_view_tab(
     paned.set_margin_bottom(6);
     paned.set_margin_start(6);
     paned.set_margin_end(6);
-    
+
     // Left side: Notes
     let notes_container = GtkBox::new(Orientation::Vertical, 0);
-    
+
     let notes_scrolled = ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -701,9 +705,9 @@ pub fn create_split_view_tab(
     if let Ok(content) = fs::read_to_string(&notes_path) {
         notes_view.buffer().set_text(&content);
     }
-    
+
     apply_markdown_highlighting(&notes_view);
-    
+
     // Add text view to zoom tracking
     crate::ui::editor::add_textview_scroll_zoom(&notes_view);
 
@@ -712,17 +716,17 @@ pub fn create_split_view_tab(
     let notes_view_clone = notes_view.clone();
     let save_timeout_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
     let save_timeout_clone = Rc::clone(&save_timeout_id);
-    
+
     notes_view.buffer().connect_changed(move |buffer| {
         let file_path = notes_path_clone.clone();
         let notes_view_ref = notes_view_clone.clone();
-        
+
         if let Some(id) = save_timeout_clone.borrow_mut().take() {
             id.remove();
         }
-        
+
         apply_markdown_highlighting(&notes_view_ref);
-        
+
         let save_timeout_inner = Rc::clone(&save_timeout_clone);
         let buffer_clone = buffer.clone();
         let source_id = glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
@@ -737,17 +741,17 @@ pub fn create_split_view_tab(
     });
 
     notes_scrolled.set_child(Some(&notes_view));
-    
+
     // Notes toolbar
     let notes_bar = GtkBox::new(Orientation::Horizontal, 6);
     notes_bar.set_margin_top(6);
-    
+
     let save_btn = Button::builder()
         .icon_name("document-save-symbolic")
         .tooltip_text("Save")
         .build();
     save_btn.add_css_class("flat");
-    
+
     let notes_path_clone2 = notes_path.clone();
     let notes_view_clone2 = notes_view.clone();
     save_btn.connect_clicked(move |_| {
@@ -765,13 +769,13 @@ pub fn create_split_view_tab(
 
     notes_bar.append(&save_btn);
     notes_bar.append(&file_label);
-    
+
     notes_container.append(&notes_scrolled);
     notes_container.append(&notes_bar);
-    
+
     // Right side: Shell
     let shell_container = create_shell_tab(_shell_id, notebook, shell_counter, toast_overlay, true);
-    
+
     paned.set_start_child(Some(&notes_container));
     paned.set_end_child(Some(&shell_container));
     paned.set_position(500);
@@ -789,48 +793,48 @@ fn show_target_selector_popup(terminal: &Terminal) {
     if targets.is_empty() {
         return;
     }
-    
+
     let popup = adw::Window::builder()
         .title("Select Target")
         .modal(true)
         .default_width(350)
         .default_height(300)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(320);
-    
+
     let popup_box = GtkBox::new(Orientation::Vertical, 12);
     popup_box.set_margin_top(16);
     popup_box.set_margin_bottom(16);
     popup_box.set_margin_start(16);
     popup_box.set_margin_end(16);
-    
+
     let scrolled = ScrolledWindow::builder()
         .vexpand(true)
         .build();
-    
+
     let list_box = gtk::ListBox::new();
     list_box.set_selection_mode(gtk::SelectionMode::Single);
     list_box.add_css_class("boxed-list");
-    
+
     for target in targets.iter() {
         let row = adw::ActionRow::new();
         row.set_title(target);
         row.set_activatable(true);
         list_box.append(&row);
     }
-    
+
     list_box.select_row(list_box.row_at_index(0).as_ref());
     scrolled.set_child(Some(&list_box));
-    
+
     let button_box = GtkBox::new(Orientation::Horizontal, 8);
     button_box.set_halign(gtk::Align::End);
-    
+
     let insert_btn = Button::with_label("Insert");
     insert_btn.add_css_class("suggested-action");
     let cancel_btn = Button::with_label("Cancel");
-    
+
     let popup_clone = popup.clone();
     let terminal_clone = terminal.clone();
     let list_box_clone = list_box.clone();
@@ -845,12 +849,12 @@ fn show_target_selector_popup(terminal: &Terminal) {
         }
         popup_clone.close();
     });
-    
+
     let popup_clone2 = popup.clone();
     cancel_btn.connect_clicked(move |_| {
         popup_clone2.close();
     });
-    
+
     // Enter key handler
     let popup_clone3 = popup.clone();
     let terminal_clone2 = terminal.clone();
@@ -863,7 +867,7 @@ fn show_target_selector_popup(terminal: &Terminal) {
         }
         popup_clone3.close();
     });
-    
+
     // Keyboard handling
     let key_controller = gtk::EventControllerKey::new();
     let popup_clone4 = popup.clone();
@@ -888,13 +892,13 @@ fn show_target_selector_popup(terminal: &Terminal) {
         gtk::glib::Propagation::Proceed
     });
     popup.add_controller(key_controller);
-    
+
     button_box.append(&cancel_btn);
     button_box.append(&insert_btn);
-    
+
     popup_box.append(&scrolled);
     popup_box.append(&button_box);
-    
+
     content.set_child(Some(&popup_box));
     popup.set_content(Some(&content));
     popup.present();
@@ -908,48 +912,48 @@ fn show_target_selector_for_command(terminal: &Terminal, command_template: Strin
         terminal.feed_child(b" ");
         return;
     }
-    
+
     let popup = adw::Window::builder()
         .title("Select Target for Command")
         .modal(true)
         .default_width(350)
         .default_height(300)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(320);
-    
+
     let popup_box = GtkBox::new(Orientation::Vertical, 12);
     popup_box.set_margin_top(16);
     popup_box.set_margin_bottom(16);
     popup_box.set_margin_start(16);
     popup_box.set_margin_end(16);
-    
+
     let scrolled = ScrolledWindow::builder()
         .vexpand(true)
         .build();
-    
+
     let list_box = gtk::ListBox::new();
     list_box.set_selection_mode(gtk::SelectionMode::Single);
     list_box.add_css_class("boxed-list");
-    
+
     for target in targets.iter() {
         let row = adw::ActionRow::new();
         row.set_title(target);
         row.set_activatable(true);
         list_box.append(&row);
     }
-    
+
     list_box.select_row(list_box.row_at_index(0).as_ref());
     scrolled.set_child(Some(&list_box));
-    
+
     let button_box = GtkBox::new(Orientation::Horizontal, 8);
     button_box.set_halign(gtk::Align::End);
-    
+
     let insert_btn = Button::with_label("Insert");
     insert_btn.add_css_class("suggested-action");
     let cancel_btn = Button::with_label("Cancel");
-    
+
     let popup_clone = popup.clone();
     let terminal_clone = terminal.clone();
     let list_box_clone = list_box.clone();
@@ -969,12 +973,12 @@ fn show_target_selector_for_command(terminal: &Terminal, command_template: Strin
         }
         popup_clone.close();
     });
-    
+
     let popup_clone2 = popup.clone();
     cancel_btn.connect_clicked(move |_| {
         popup_clone2.close();
     });
-    
+
     let popup_clone3 = popup.clone();
     let terminal_clone2 = terminal.clone();
     let targets_clone2 = targets.clone();
@@ -991,7 +995,7 @@ fn show_target_selector_for_command(terminal: &Terminal, command_template: Strin
         }
         popup_clone3.close();
     });
-    
+
     let key_controller = gtk::EventControllerKey::new();
     let popup_clone4 = popup.clone();
     let terminal_clone3 = terminal.clone();
@@ -1020,13 +1024,13 @@ fn show_target_selector_for_command(terminal: &Terminal, command_template: Strin
         gtk::glib::Propagation::Proceed
     });
     popup.add_controller(key_controller);
-    
+
     button_box.append(&cancel_btn);
     button_box.append(&insert_btn);
-    
+
     popup_box.append(&scrolled);
     popup_box.append(&button_box);
-    
+
     content.set_child(Some(&popup_box));
     popup.set_content(Some(&content));
     popup.present();
@@ -1064,7 +1068,7 @@ pub fn focus_terminal_in_split_view(page: &gtk::Widget) {
 /// Reload targets in all shell tabs
 pub fn reload_targets_in_shells(notebook: &Notebook) {
     let targets = load_targets();
-    
+
     // Update notes tab
     if let Some(notes_page) = notebook.nth_page(Some(tabs::NOTES)) {
         if let Some(notes_box) = notes_page.downcast_ref::<GtkBox>() {
@@ -1094,7 +1098,7 @@ pub fn reload_targets_in_shells(notebook: &Notebook) {
             }
         }
     }
-    
+
     // Update shell tabs
     for i in tabs::FIRST_SHELL..notebook.n_pages() {
         if let Some(page) = notebook.nth_page(Some(i)) {
