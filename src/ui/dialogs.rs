@@ -94,15 +94,13 @@ where
     let dialog_clone2 = dialog.clone();
     let callback_clone2 = Rc::clone(&callback_rc);
     browse_btn.connect_clicked(move |_| {
-        let file_chooser = gtk::FileChooserDialog::new(
-            Some("Select Base Directory"),
-            Some(&dialog_clone2),
-            gtk::FileChooserAction::SelectFolder,
-            &[
-                ("Cancel", gtk::ResponseType::Cancel),
-                ("Select", gtk::ResponseType::Accept),
-            ],
-        );
+        let file_chooser = gtk::FileChooserDialog::builder()
+            .title("Select Base Directory")
+            .transient_for(&dialog_clone2)
+            .action(gtk::FileChooserAction::SelectFolder)
+            .build();
+        file_chooser.add_button("Cancel", gtk::ResponseType::Cancel);
+        file_chooser.add_button("Select", gtk::ResponseType::Accept);
 
         let dialog_clone3 = dialog_clone2.clone();
         let callback_clone3 = Rc::clone(&callback_clone2);
