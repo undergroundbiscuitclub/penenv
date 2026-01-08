@@ -26,7 +26,7 @@ thread_local! {
 pub fn set_text_zoom_scale(scale: f64) {
     let clamped = scale.clamp(zoom::MIN_SCALE, zoom::MAX_SCALE);
     set_text_zoom_scale_raw(clamped);
-    
+
     // Update all tracked text views
     TEXT_VIEWS.with(|views| {
         let views = views.borrow();
@@ -34,7 +34,7 @@ pub fn set_text_zoom_scale(scale: f64) {
             apply_text_zoom_to_view(view, clamped);
         }
     });
-    
+
     // Save to settings
     let mut settings = get_app_settings();
     settings.text_zoom_scale = Some(clamped);
@@ -45,11 +45,11 @@ pub fn set_text_zoom_scale(scale: f64) {
 fn apply_text_zoom_to_view(text_view: &TextView, scale: f64) {
     let base_size = 10.0;
     let new_size = base_size * scale;
-    
+
     let css_provider = gtk::CssProvider::new();
     let css = format!("textview {{ font-size: {}pt; }}", new_size);
     css_provider.load_from_data(&css);
-    
+
     let style_context = text_view.style_context();
     style_context.add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
@@ -60,14 +60,14 @@ pub fn add_textview_scroll_zoom(text_view: &TextView) {
     TEXT_VIEWS.with(|views| {
         views.borrow_mut().push(text_view.clone());
     });
-    
+
     // Apply current zoom scale
     let current_scale = get_text_zoom_scale();
     apply_text_zoom_to_view(text_view, current_scale);
-    
+
     let scroll_controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     let scroll_controller_clone = scroll_controller.clone();
-    
+
     scroll_controller.connect_scroll(move |_, _, dy| {
         let modifiers = scroll_controller_clone.current_event_state();
         if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
@@ -82,7 +82,7 @@ pub fn add_textview_scroll_zoom(text_view: &TextView) {
         }
         gtk::glib::Propagation::Proceed
     });
-    
+
     text_view.add_controller(scroll_controller);
 }
 
@@ -95,15 +95,15 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
     container.set_margin_end(6);
 
     let is_notes = file_path == get_file_path("notes.md").to_string_lossy().to_string();
-    
+
     // Add target selector for notes tab
     let target_combo_opt = if is_notes {
         let target_box = GtkBox::new(Orientation::Horizontal, 6);
         target_box.set_margin_bottom(6);
-        
+
         let target_combo = gtk::ComboBoxText::new();
         target_combo.set_hexpand(true);
-        
+
         let targets = load_targets();
         for target in &targets {
             target_combo.append_text(target);
@@ -111,7 +111,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
         if !targets.is_empty() {
             target_combo.set_active(Some(0));
         }
-        
+
         target_box.append(&target_combo);
         container.append(&target_box);
         Some((target_box, target_combo))
@@ -137,7 +137,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
     if let Ok(content) = fs::read_to_string(file_path) {
         text_view.buffer().set_text(&content);
     }
-    
+
     if is_notes {
         apply_markdown_highlighting(&text_view);
     }
@@ -151,17 +151,17 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
         let text_view_clone = text_view.clone();
         let save_timeout_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
         let save_timeout_clone = Rc::clone(&save_timeout_id);
-        
+
         text_view.buffer().connect_changed(move |buffer| {
             let file_path = file_path_owned.clone();
             let text_view_ref = text_view_clone.clone();
-            
+
             if let Some(id) = save_timeout_clone.borrow_mut().take() {
                 id.remove();
             }
-            
+
             apply_markdown_highlighting(&text_view_ref);
-            
+
             let save_timeout_inner = Rc::clone(&save_timeout_clone);
             let buffer_clone = buffer.clone();
             let source_id = glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
@@ -174,7 +174,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
             });
             *save_timeout_clone.borrow_mut() = Some(source_id);
         });
-        
+
         // Add insert target button for notes
         if let Some((target_box, target_combo)) = target_combo_opt {
             let insert_target_btn = Button::builder()
@@ -182,7 +182,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
                 .tooltip_text("Insert Target")
                 .build();
             insert_target_btn.add_css_class("flat");
-            
+
             let text_view_clone2 = text_view.clone();
             insert_target_btn.connect_clicked(move |_| {
                 if let Some(target) = target_combo.active_text() {
@@ -198,13 +198,13 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
     // Bottom bar with save button
     let button_box = GtkBox::new(Orientation::Horizontal, 6);
     button_box.set_margin_top(6);
-    
+
     let save_btn = Button::builder()
         .icon_name("document-save-symbolic")
         .tooltip_text("Save (Ctrl+S)")
         .build();
     save_btn.add_css_class("flat");
-    
+
     let file_path_owned = file_path.to_string();
     let text_view_clone = text_view.clone();
     let notebook_clone = notebook.clone();
@@ -214,7 +214,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
         let end = buffer.end_iter();
         let text = buffer.text(&start, &end, false);
         let _ = fs::write(&file_path_owned, text.as_str());
-        
+
         if file_path_owned == get_file_path("targets.txt").to_string_lossy().to_string() {
             if let Some(ref nb) = notebook_clone {
                 reload_targets_in_shells(nb);
@@ -237,7 +237,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
     let notebook_clone2 = notebook.clone();
     let text_view_clone3 = text_view.clone();
     let text_view_clone4 = text_view.clone();
-    
+
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
             if keyval == gtk::gdk::Key::s {
@@ -246,7 +246,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
                 let end = buffer.end_iter();
                 let text = buffer.text(&start, &end, false);
                 let _ = fs::write(&file_path_owned2, text.as_str());
-                
+
                 if file_path_owned2 == get_file_path("targets.txt").to_string_lossy().to_string() {
                     if let Some(ref nb) = notebook_clone2 {
                         reload_targets_in_shells(nb);
@@ -254,14 +254,14 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
                 }
                 return gtk::glib::Propagation::Stop;
             }
-            
+
             let shortcuts = get_keyboard_shortcuts();
             let key_name = keyval.name().unwrap_or_default().to_string();
             if key_name == shortcuts.insert_target {
                 show_target_selector_for_textview(&text_view_clone3);
                 return gtk::glib::Propagation::Stop;
             }
-            
+
             if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) && key_name == shortcuts.insert_timestamp {
                 let timestamp = chrono::Local::now().format("[%Y-%m-%d %H:%M:%S] ").to_string();
                 let buffer = text_view_clone4.buffer();
@@ -315,13 +315,13 @@ pub fn create_readonly_viewer(file_path: &str) -> GtkBox {
 
     let button_box = GtkBox::new(Orientation::Horizontal, 6);
     button_box.set_margin_top(6);
-    
+
     let refresh_btn = Button::builder()
         .icon_name("view-refresh-symbolic")
         .tooltip_text("Refresh")
         .build();
     refresh_btn.add_css_class("flat");
-    
+
     let file_path_owned = file_path.to_string();
     let text_view_clone = text_view.clone();
     refresh_btn.connect_clicked(move |_| {
@@ -348,35 +348,35 @@ pub fn create_readonly_viewer(file_path: &str) -> GtkBox {
 }
 
 /// Shows a target selector popup for TextView
-fn show_target_selector_for_textview(text_view: &TextView) {
+pub fn show_target_selector_for_textview(text_view: &TextView) {
     let targets = load_targets();
-    
+
     if targets.is_empty() {
         return;
     }
-    
+
     let popup = adw::Window::builder()
         .title("Select Target")
         .modal(true)
         .default_width(350)
         .default_height(300)
         .build();
-    
+
     let content = adw::Clamp::new();
     content.set_maximum_size(320);
-    
+
     let popup_box = GtkBox::new(Orientation::Vertical, 12);
     popup_box.set_margin_top(16);
     popup_box.set_margin_bottom(16);
     popup_box.set_margin_start(16);
     popup_box.set_margin_end(16);
-    
+
     let scrolled = ScrolledWindow::new();
     scrolled.set_vexpand(true);
-    
+
     let list_box = gtk::ListBox::new();
     list_box.add_css_class("boxed-list");
-    
+
     for target in &targets {
         let row = gtk::ListBoxRow::new();
         let label = Label::new(Some(target));
@@ -388,22 +388,22 @@ fn show_target_selector_for_textview(text_view: &TextView) {
         list_box.append(&row);
     }
 
-    
+
     if let Some(first_row) = list_box.row_at_index(0) {
         list_box.select_row(Some(&first_row));
     }
-    
+
     scrolled.set_child(Some(&list_box));
-    
+
     let button_box = GtkBox::new(Orientation::Horizontal, 8);
     button_box.set_halign(gtk::Align::End);
-    
+
     let cancel_btn = Button::with_label("Cancel");
     let popup_clone = popup.clone();
     cancel_btn.connect_clicked(move |_| {
         popup_clone.close();
     });
-    
+
     let insert_btn = Button::with_label("Insert");
     insert_btn.add_css_class("suggested-action");
     let popup_clone2 = popup.clone();
@@ -421,7 +421,7 @@ fn show_target_selector_for_textview(text_view: &TextView) {
         }
         popup_clone2.close();
     });
-    
+
     // Handle double-click/activation
     let popup_clone3 = popup.clone();
     let text_view_clone2 = text_view.clone();
@@ -435,7 +435,7 @@ fn show_target_selector_for_textview(text_view: &TextView) {
         }
         popup_clone3.close();
     });
-    
+
     // Keyboard handling
     let key_controller = gtk::EventControllerKey::new();
     let popup_clone4 = popup.clone();
@@ -461,13 +461,13 @@ fn show_target_selector_for_textview(text_view: &TextView) {
         gtk::glib::Propagation::Proceed
     });
     popup.add_controller(key_controller);
-    
+
     button_box.append(&cancel_btn);
     button_box.append(&insert_btn);
-    
+
     popup_box.append(&scrolled);
     popup_box.append(&button_box);
-    
+
     content.set_child(Some(&popup_box));
     popup.set_content(Some(&content));
     popup.present();
@@ -479,11 +479,11 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
     let start = buffer.start_iter();
     let end = buffer.end_iter();
     let text = buffer.text(&start, &end, false);
-    
+
     buffer.remove_all_tags(&start, &end);
-    
+
     let tag_table = buffer.tag_table();
-    
+
     // Create tags if they don't exist
     for level in 1..=6 {
         let tag_name = format!("h{}", level);
@@ -498,15 +498,15 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
             );
         }
     }
-    
+
     if tag_table.lookup("bold").is_none() {
         buffer.create_tag(Some("bold"), &[("weight", &700)]);
     }
-    
+
     if tag_table.lookup("italic").is_none() {
         buffer.create_tag(Some("italic"), &[("style", &gtk::pango::Style::Italic)]);
     }
-    
+
     if tag_table.lookup("code").is_none() {
         buffer.create_tag(
             Some("code"),
@@ -517,7 +517,7 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
             ],
         );
     }
-    
+
     if tag_table.lookup("code_block").is_none() {
         buffer.create_tag(
             Some("code_block"),
@@ -529,7 +529,7 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
             ],
         );
     }
-    
+
     if tag_table.lookup("link").is_none() {
         buffer.create_tag(
             Some("link"),
@@ -539,11 +539,11 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
             ],
         );
     }
-    
+
     if tag_table.lookup("list").is_none() {
         buffer.create_tag(Some("list"), &[("foreground", &"#DCDCAA")]);
     }
-    
+
     if tag_table.lookup("blockquote").is_none() {
         buffer.create_tag(
             Some("blockquote"),
@@ -553,16 +553,16 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
             ],
         );
     }
-    
+
     // Apply tags
     let lines: Vec<&str> = text.split('\n').collect();
     let mut current_pos = 0i32;
     let mut in_code_block = false;
-    
+
     for line in lines {
         let line_start = current_pos;
         let line_end = current_pos + line.len() as i32;
-        
+
         if line.trim_start().starts_with("```") {
             in_code_block = !in_code_block;
             let mut start_iter = buffer.iter_at_offset(line_start);
@@ -592,7 +592,7 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
                     buffer.apply_tag_by_name("list", &mut start_iter, &mut end_iter);
                 }
             }
-            
+
             // Inline formatting
             let mut i = 0;
             let chars: Vec<char> = line.chars().collect();
@@ -642,7 +642,7 @@ pub fn apply_markdown_highlighting(text_view: &TextView) {
                 i += 1;
             }
         }
-        
+
         current_pos = line_end + 1;
     }
 }

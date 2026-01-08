@@ -742,6 +742,46 @@ pub fn create_split_view_tab(
 
     notes_scrolled.set_child(Some(&notes_view));
 
+    // Add keyboard shortcuts for notes (Ctrl+S, Ctrl+T for target, Ctrl+Shift+T for timestamp)
+    let key_controller = gtk::EventControllerKey::new();
+    let notes_path_clone3 = notes_path.clone();
+    let notes_view_clone3 = notes_view.clone();
+    let notes_view_clone4 = notes_view.clone();
+    let notes_view_clone5 = notes_view.clone();
+
+    key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
+        if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            // Ctrl+S to save
+            if keyval == gtk::gdk::Key::s {
+                let buffer = notes_view_clone3.buffer();
+                let start = buffer.start_iter();
+                let end = buffer.end_iter();
+                let text = buffer.text(&start, &end, false);
+                let _ = fs::write(&notes_path_clone3, text.as_str());
+                return gtk::glib::Propagation::Stop;
+            }
+
+            let shortcuts = get_keyboard_shortcuts();
+            let key_name = keyval.name().unwrap_or_default().to_string();
+
+            // Ctrl+T (or custom key) for target insertion
+            if key_name == shortcuts.insert_target {
+                crate::ui::editor::show_target_selector_for_textview(&notes_view_clone4);
+                return gtk::glib::Propagation::Stop;
+            }
+
+            // Ctrl+Shift+T (or custom key) for timestamp insertion
+            if modifier.contains(gtk::gdk::ModifierType::SHIFT_MASK) && key_name == shortcuts.insert_timestamp {
+                let timestamp = chrono::Local::now().format("[%Y-%m-%d %H:%M:%S] ").to_string();
+                let buffer = notes_view_clone5.buffer();
+                buffer.insert_at_cursor(&timestamp);
+                return gtk::glib::Propagation::Stop;
+            }
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    notes_view.add_controller(key_controller);
+
     // Notes toolbar
     let notes_bar = GtkBox::new(Orientation::Horizontal, 6);
     notes_bar.set_margin_top(6);
