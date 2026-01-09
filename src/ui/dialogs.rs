@@ -12,6 +12,7 @@ use std::rc::Rc;
 use crate::config::{
     get_app_settings, save_app_settings, get_keyboard_shortcuts, key_to_display,
     get_text_zoom_scale, get_terminal_zoom_scale, is_command_logging_enabled, zoom,
+    is_notes_wrap_text_enabled,
 };
 use crate::commands::{load_custom_commands, save_custom_command, delete_custom_command,
                       update_custom_command, CommandTemplate};
@@ -420,6 +421,26 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
 
     terminal_box.append(&scrollback_box);
     page.append(&terminal_box);
+
+    // Notes Group
+    let notes_heading = Label::new(Some("Notes Settings"));
+    notes_heading.add_css_class("title-4");
+    notes_heading.set_halign(gtk::Align::Start);
+    notes_heading.set_margin_bottom(12);
+    page.append(&notes_heading);
+
+    let notes_box = GtkBox::new(Orientation::Vertical, 8);
+    notes_box.set_margin_start(12);
+    notes_box.set_margin_bottom(24);
+
+    let wrap_check = CheckButton::with_label("Wrap text in notes views");
+    wrap_check.set_active(is_notes_wrap_text_enabled());
+    wrap_check.connect_toggled(move |check| {
+        crate::ui::editor::set_notes_wrap_mode(check.is_active());
+    });
+    notes_box.append(&wrap_check);
+
+    page.append(&notes_box);
 
     // Zoom Group
     let zoom_heading = Label::new(Some("Zoom Settings"));

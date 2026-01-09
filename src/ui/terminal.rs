@@ -18,7 +18,7 @@ use crate::config::{
     is_command_logging_enabled, zoom, tabs, get_base_dir,
 };
 use crate::commands::load_command_templates;
-use crate::ui::editor::apply_markdown_highlighting;
+use crate::ui::editor::{apply_markdown_highlighting, track_notes_view};
 
 // Track all terminals for global zoom
 thread_local! {
@@ -707,6 +707,9 @@ pub fn create_split_view_tab(
     }
 
     apply_markdown_highlighting(&notes_view);
+
+    // Track notes view for wrap mode updates
+    track_notes_view(&notes_view);
 
     // Add text view to zoom tracking
     crate::ui::editor::add_textview_scroll_zoom(&notes_view);

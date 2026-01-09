@@ -12,7 +12,7 @@ use std::fs;
 
 use crate::config::{
     get_file_path, get_app_settings, save_app_settings, get_keyboard_shortcuts,
-    get_text_zoom_scale, set_text_zoom_scale_raw, load_targets, zoom,
+    get_text_zoom_scale, set_text_zoom_scale_raw, load_targets, zoom, is_notes_wrap_text_enabled,
 };
 
 use crate::ui::terminal::reload_targets_in_shells;
@@ -20,6 +20,7 @@ use crate::ui::terminal::reload_targets_in_shells;
 // Track all text views for global zoom
 thread_local! {
     static TEXT_VIEWS: RefCell<Vec<TextView>> = RefCell::new(Vec::new());
+    static NOTES_VIEWS: RefCell<Vec<TextView>> = RefCell::new(Vec::new());
 }
 
 /// Sets the text zoom scale and updates all text views
@@ -52,6 +53,42 @@ fn apply_text_zoom_to_view(text_view: &TextView, scale: f64) {
 
     let style_context = text_view.style_context();
     style_context.add_provider(&css_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+/// Tracks a notes view for wrap mode updates
+pub fn track_notes_view(text_view: &TextView) {
+    NOTES_VIEWS.with(|views| {
+        views.borrow_mut().push(text_view.clone());
+    });
+
+    // Apply current wrap mode setting
+    let wrap_mode = if is_notes_wrap_text_enabled() {
+        gtk::WrapMode::WordChar
+    } else {
+        gtk::WrapMode::None
+    };
+    text_view.set_wrap_mode(wrap_mode);
+}
+
+/// Sets the notes wrap mode and updates all notes views
+pub fn set_notes_wrap_mode(enabled: bool) {
+    let wrap_mode = if enabled {
+        gtk::WrapMode::WordChar
+    } else {
+        gtk::WrapMode::None
+    };
+
+    NOTES_VIEWS.with(|views| {
+        let views = views.borrow();
+        for view in views.iter() {
+            view.set_wrap_mode(wrap_mode);
+        }
+    });
+
+    // Save to settings
+    let mut settings = get_app_settings();
+    settings.notes_wrap_text = enabled;
+    let _ = save_app_settings(&settings);
 }
 
 /// Adds Ctrl+scroll zoom functionality to a TextView
@@ -140,6 +177,7 @@ pub fn create_text_editor(file_path: &str, notebook: Option<gtk::Notebook>) -> G
 
     if is_notes {
         apply_markdown_highlighting(&text_view);
+        track_notes_view(&text_view);
     }
 
     add_textview_scroll_zoom(&text_view);

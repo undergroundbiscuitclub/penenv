@@ -58,6 +58,8 @@ pub struct AppSettings {
     pub text_zoom_scale: Option<f64>,
     pub terminal_zoom_scale: Option<f64>,
     pub terminal_scrollback_lines: i64,
+    #[serde(default)]
+    pub notes_wrap_text: bool,
 }
 
 impl Default for AppSettings {
@@ -69,6 +71,7 @@ impl Default for AppSettings {
             text_zoom_scale: Some(1.0),
             terminal_zoom_scale: Some(1.0),
             terminal_scrollback_lines: 10000,
+            notes_wrap_text: false,
         }
     }
 }
@@ -192,6 +195,11 @@ pub fn get_keyboard_shortcuts() -> KeyboardShortcuts {
 /// Checks if command logging is enabled
 pub fn is_command_logging_enabled() -> bool {
     APP_SETTINGS.with(|s| s.borrow().enable_command_logging)
+}
+
+/// Checks if notes text wrapping is enabled
+pub fn is_notes_wrap_text_enabled() -> bool {
+    APP_SETTINGS.with(|s| s.borrow().notes_wrap_text)
 }
 
 /// Gets the current text zoom scale
