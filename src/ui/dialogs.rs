@@ -12,7 +12,7 @@ use std::rc::Rc;
 use crate::config::{
     get_app_settings, save_app_settings, get_keyboard_shortcuts, key_to_display,
     get_text_zoom_scale, get_terminal_zoom_scale, is_command_logging_enabled, zoom,
-    is_notes_wrap_text_enabled,
+    is_notes_wrap_text_enabled, get_browser_settings, BrowserSettings, ProxyType,
 };
 use crate::commands::{load_custom_commands, save_custom_command, delete_custom_command,
                       update_custom_command, CommandTemplate};
@@ -157,7 +157,7 @@ fn create_about_page() -> ScrolledWindow {
     page.append(&app_name);
 
     // Version
-    let version = Label::new(Some("Version 1.0.3"));
+    let version = Label::new(Some(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
     version.add_css_class("title-4");
     version.set_margin_bottom(24);
     page.append(&version);
@@ -292,6 +292,11 @@ pub fn show_settings_dialog(
     let commands_page = create_commands_page(parent, &dialog, cpu_frame, ram_frame, net_frame);
     let commands_label = Label::new(Some("Commands"));
     notebook.append_page(&commands_page, Some(&commands_label));
+
+    // ===== BROWSER TAB =====
+    let browser_page = create_browser_settings_page();
+    let browser_label = Label::new(Some("Browser"));
+    notebook.append_page(&browser_page, Some(&browser_label));
 
     // ===== ABOUT TAB =====
     let about_page = create_about_page();
@@ -766,6 +771,255 @@ fn show_key_capture_dialog(parent: &adw::ApplicationWindow, shortcut_name: &str,
 }
 
 /// Creates the custom commands page
+/// Creates the browser settings page with proxy configuration
+fn create_browser_settings_page() -> ScrolledWindow {
+    let scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(500);
+
+    let page = GtkBox::new(Orientation::Vertical, 24);
+    page.set_margin_top(24);
+    page.set_margin_bottom(24);
+    page.set_margin_start(12);
+    page.set_margin_end(12);
+
+    // Load current settings
+    let current_settings = get_browser_settings();
+
+    // ===== PROXY SETTINGS =====
+    let proxy_group = adw::PreferencesGroup::new();
+    proxy_group.set_title("Proxy Settings");
+    proxy_group.set_description(Some("Configure HTTP or SOCKS5 proxy for browser tabs"));
+
+    // Proxy type selector
+    let proxy_type_row = adw::ComboRow::new();
+    proxy_type_row.set_title("Proxy Type");
+    let proxy_types = gtk::StringList::new(&["None", "HTTP", "SOCKS5"]);
+    proxy_type_row.set_model(Some(&proxy_types));
+    proxy_type_row.set_selected(match current_settings.proxy_type {
+        ProxyType::None => 0,
+        ProxyType::Http => 1,
+        ProxyType::Socks5 => 2,
+    });
+    proxy_group.add(&proxy_type_row);
+
+    page.append(&proxy_group);
+
+    // Host and port fields
+    let connection_group = adw::PreferencesGroup::new();
+    connection_group.set_title("Connection");
+
+    let host_box = GtkBox::new(Orientation::Horizontal, 8);
+    host_box.set_margin_top(8);
+    host_box.set_margin_bottom(8);
+    let host_label = Label::new(Some("Host:"));
+    host_label.set_width_chars(10);
+    host_label.set_xalign(0.0);
+    let host_entry = Entry::new();
+    host_entry.set_hexpand(true);
+    host_entry.set_text(&current_settings.proxy_host);
+    host_entry.set_placeholder_text(Some("e.g., 127.0.0.1"));
+    host_box.append(&host_label);
+    host_box.append(&host_entry);
+
+    let port_box = GtkBox::new(Orientation::Horizontal, 8);
+    port_box.set_margin_bottom(8);
+    let port_label = Label::new(Some("Port:"));
+    port_label.set_width_chars(10);
+    port_label.set_xalign(0.0);
+    let port_entry = Entry::new();
+    port_entry.set_hexpand(true);
+    port_entry.set_text(&current_settings.proxy_port.to_string());
+    port_entry.set_placeholder_text(Some("e.g., 8080"));
+    port_box.append(&port_label);
+    port_box.append(&port_entry);
+
+    connection_group.add(&host_box);
+    connection_group.add(&port_box);
+    page.append(&connection_group);
+
+    // Authentication fields
+    let auth_group = adw::PreferencesGroup::new();
+    auth_group.set_title("Authentication (Optional)");
+
+    let username_box = GtkBox::new(Orientation::Horizontal, 8);
+    username_box.set_margin_top(8);
+    username_box.set_margin_bottom(8);
+    let username_label = Label::new(Some("Username:"));
+    username_label.set_width_chars(10);
+    username_label.set_xalign(0.0);
+    let username_entry = Entry::new();
+    username_entry.set_hexpand(true);
+    if let Some(ref username) = current_settings.proxy_username {
+        username_entry.set_text(username);
+    }
+    username_box.append(&username_label);
+    username_box.append(&username_entry);
+
+    let password_box = GtkBox::new(Orientation::Horizontal, 8);
+    password_box.set_margin_bottom(8);
+    let password_label = Label::new(Some("Password:"));
+    password_label.set_width_chars(10);
+    password_label.set_xalign(0.0);
+    let password_entry = gtk::PasswordEntry::new();
+    password_entry.set_hexpand(true);
+    password_entry.set_show_peek_icon(true);
+    if let Some(ref password) = current_settings.proxy_password {
+        password_entry.set_text(password);
+    }
+    password_box.append(&password_label);
+    password_box.append(&password_entry);
+
+    auth_group.add(&username_box);
+    auth_group.add(&password_box);
+    page.append(&auth_group);
+
+    // CA Certificate settings
+    let ca_group = adw::PreferencesGroup::new();
+    ca_group.set_title("CA Certificate (for Burp Suite, etc.)");
+    ca_group.set_description(Some("Add a custom CA certificate to trust proxy-intercepted connections"));
+
+    let ca_box = GtkBox::new(Orientation::Horizontal, 8);
+    ca_box.set_margin_top(8);
+    ca_box.set_margin_bottom(8);
+    let ca_label = Label::new(Some("Certificate:"));
+    ca_label.set_width_chars(10);
+    ca_label.set_xalign(0.0);
+    let ca_entry = Entry::new();
+    ca_entry.set_hexpand(true);
+    ca_entry.set_placeholder_text(Some("Path to CA certificate (.pem, .crt, .der)"));
+    if let Some(ref ca_path) = current_settings.ca_certificate_path {
+        ca_entry.set_text(ca_path);
+    }
+
+    let ca_browse_btn = Button::with_label("Browse...");
+    let ca_entry_clone = ca_entry.clone();
+    ca_browse_btn.connect_clicked(move |btn| {
+        let parent_window = btn.root().and_then(|r| r.downcast::<gtk::Window>().ok());
+
+        let dialog = gtk::FileChooserNative::new(
+            Some("Select CA Certificate"),
+            parent_window.as_ref(),
+            gtk::FileChooserAction::Open,
+            Some("Select"),
+            Some("Cancel"),
+        );
+
+        let filter = gtk::FileFilter::new();
+        filter.set_name(Some("Certificate files"));
+        filter.add_pattern("*.pem");
+        filter.add_pattern("*.crt");
+        filter.add_pattern("*.der");
+        filter.add_pattern("*.cer");
+        dialog.add_filter(&filter);
+
+        let all_filter = gtk::FileFilter::new();
+        all_filter.set_name(Some("All files"));
+        all_filter.add_pattern("*");
+        dialog.add_filter(&all_filter);
+
+        let ca_entry_for_dialog = ca_entry_clone.clone();
+        dialog.connect_response(move |dialog, response| {
+            if response == gtk::ResponseType::Accept {
+                if let Some(file) = dialog.file() {
+                    if let Some(path) = file.path() {
+                        ca_entry_for_dialog.set_text(&path.to_string_lossy());
+                    }
+                }
+            }
+        });
+
+        dialog.show();
+    });
+
+    ca_box.append(&ca_label);
+    ca_box.append(&ca_entry);
+    ca_box.append(&ca_browse_btn);
+    ca_group.add(&ca_box);
+
+    let ca_info = Label::new(Some("Export Burp's CA: Proxy → Options → Import/Export CA Certificate → Export Certificate in DER format"));
+    ca_info.add_css_class("dim-label");
+    ca_info.set_wrap(true);
+    ca_info.set_xalign(0.0);
+    ca_info.set_margin_start(8);
+    ca_group.add(&ca_info);
+
+    page.append(&ca_group);
+
+    // Save button
+    let button_box = GtkBox::new(Orientation::Horizontal, 8);
+    button_box.set_halign(gtk::Align::End);
+    button_box.set_margin_top(16);
+
+    let save_btn = Button::with_label("Save Browser Settings");
+    save_btn.add_css_class("suggested-action");
+
+    save_btn.connect_clicked(move |btn| {
+        let proxy_type = match proxy_type_row.selected() {
+            0 => ProxyType::None,
+            1 => ProxyType::Http,
+            2 => ProxyType::Socks5,
+            _ => ProxyType::None,
+        };
+
+        let port: u16 = port_entry.text().parse().unwrap_or(8080);
+
+        let username = {
+            let text = username_entry.text().to_string();
+            if text.is_empty() { None } else { Some(text) }
+        };
+
+        let password = {
+            let text = password_entry.text().to_string();
+            if text.is_empty() { None } else { Some(text) }
+        };
+
+        let ca_certificate_path = {
+            let text = ca_entry.text().to_string();
+            if text.is_empty() { None } else { Some(text) }
+        };
+
+        let new_settings = BrowserSettings {
+            proxy_type,
+            proxy_host: host_entry.text().to_string(),
+            proxy_port: port,
+            proxy_username: username,
+            proxy_password: password,
+            ca_certificate_path,
+        };
+
+        // Save to app settings
+        let mut app_settings = get_app_settings();
+        app_settings.browser_settings = new_settings;
+        if save_app_settings(&app_settings).is_ok() {
+            btn.set_label("Saved!");
+            let btn_clone = btn.clone();
+            gtk::glib::timeout_add_seconds_local_once(2, move || {
+                btn_clone.set_label("Save Browser Settings");
+            });
+        }
+    });
+
+    button_box.append(&save_btn);
+    page.append(&button_box);
+
+    // Info label
+    let info_label = Label::new(Some("Note: Proxy settings apply to new browser tabs.\nExisting tabs need to be reloaded after changing settings."));
+    info_label.add_css_class("dim-label");
+    info_label.set_wrap(true);
+    info_label.set_margin_top(16);
+    page.append(&info_label);
+
+    content.set_child(Some(&page));
+    scrolled.set_child(Some(&content));
+    scrolled
+}
+
 fn create_commands_page(
     parent: &adw::ApplicationWindow,
     settings_dialog: &adw::Window,

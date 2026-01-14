@@ -1,0 +1,68 @@
+{
+  "app-id": "com.penenv.app",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "48",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "command": "penenv",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--share=network",
+    "--socket=session-bus",
+    "--filesystem=home",
+    "--filesystem=/tmp",
+    "--env=TERM=xterm-256color",
+    "--talk-name=org.freedesktop.Flatpak",
+    "--talk-name=org.freedesktop.portal.Desktop",
+    "--allow=devel"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "env": {
+      "RUST_BACKTRACE": "1",
+      "CARGO_HOME": "/run/build/penenv/cargo"
+    }
+  },
+  "modules": [
+    {
+      "name": "vte",
+      "buildsystem": "meson",
+      "config-opts": [
+        "-Dgtk4=true",
+        "-Dgtk3=false",
+        "-Dvapi=false",
+        "-Dgir=false"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://download.gnome.org/sources/vte/0.76/vte-0.76.3.tar.xz",
+          "sha256": "f678e94c056f377fd0021214adff5450cb172e9a08b160911181ddff7b7d5d60"
+        }
+      ]
+    },
+    {
+      "name": "penenv",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo --offline fetch --manifest-path Cargo.toml --verbose",
+        "cargo --offline build --release --verbose",
+        "install -Dm755 target/release/penenv /app/bin/penenv",
+        "install -Dm644 penenv.desktop /app/share/applications/com.penenv.app.desktop",
+        "install -Dm644 images/penenv-icon.png /app/share/icons/hicolor/256x256/apps/com.penenv.app.png",
+        "install -Dm644 images/penenv-icon.svg /app/share/icons/hicolor/scalable/apps/com.penenv.app.svg",
+        "install -Dm644 commands.yaml /app/share/penenv/commands.yaml"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "."
+        },
+        "cargo-sources.json"
+      ]
+    }
+  ]
+}

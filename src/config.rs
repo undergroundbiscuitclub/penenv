@@ -9,6 +9,11 @@ use std::path::PathBuf;
 use std::cell::RefCell;
 use gtk4::glib;
 
+/// Checks if we're running inside a Flatpak sandbox
+pub fn is_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
 /// Configuration for keyboard shortcuts
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct KeyboardShortcuts {
@@ -49,6 +54,45 @@ impl Default for MonitorVisibility {
     }
 }
 
+/// Proxy type configuration
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub enum ProxyType {
+    None,
+    Http,
+    Socks5,
+}
+
+impl Default for ProxyType {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Browser settings including proxy configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BrowserSettings {
+    pub proxy_type: ProxyType,
+    pub proxy_host: String,
+    pub proxy_port: u16,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
+    #[serde(default)]
+    pub ca_certificate_path: Option<String>,
+}
+
+impl Default for BrowserSettings {
+    fn default() -> Self {
+        Self {
+            proxy_type: ProxyType::None,
+            proxy_host: String::new(),
+            proxy_port: 8080,
+            proxy_username: None,
+            proxy_password: None,
+            ca_certificate_path: None,
+        }
+    }
+}
+
 /// Main application settings
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AppSettings {
@@ -57,9 +101,12 @@ pub struct AppSettings {
     pub enable_command_logging: bool,
     pub text_zoom_scale: Option<f64>,
     pub terminal_zoom_scale: Option<f64>,
+    pub browser_zoom_scale: Option<f64>,
     pub terminal_scrollback_lines: i64,
     #[serde(default)]
     pub notes_wrap_text: bool,
+    #[serde(default)]
+    pub browser_settings: BrowserSettings,
 }
 
 impl Default for AppSettings {
@@ -70,10 +117,17 @@ impl Default for AppSettings {
             enable_command_logging: true,
             text_zoom_scale: Some(1.0),
             terminal_zoom_scale: Some(1.0),
+            browser_zoom_scale: Some(1.0),
             terminal_scrollback_lines: 10000,
             notes_wrap_text: false,
+            browser_settings: BrowserSettings::default(),
         }
     }
+}
+
+/// Gets the current browser settings
+pub fn get_browser_settings() -> BrowserSettings {
+    APP_SETTINGS.with(|s| s.borrow().browser_settings.clone())
 }
 
 // Thread-local storage for application state
@@ -162,6 +216,7 @@ pub fn load_app_settings() -> AppSettings {
                 if let Some(terminal_scale) = settings.terminal_zoom_scale {
                     TERMINAL_ZOOM_SCALE.with(|s| *s.borrow_mut() = terminal_scale.clamp(zoom::MIN_SCALE, zoom::MAX_SCALE));
                 }
+
                 return settings;
             }
         }
@@ -223,6 +278,8 @@ pub fn set_terminal_zoom_scale_raw(scale: f64) {
     let clamped = scale.clamp(zoom::MIN_SCALE, zoom::MAX_SCALE);
     TERMINAL_ZOOM_SCALE.with(|s| *s.borrow_mut() = clamped);
 }
+
+
 
 /// Converts a key name to display format
 pub fn key_to_display(key: &str) -> String {

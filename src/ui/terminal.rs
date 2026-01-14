@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::config::{
     get_file_path, get_app_settings, save_app_settings, get_keyboard_shortcuts,
     get_terminal_zoom_scale, set_terminal_zoom_scale_raw, load_targets,
-    is_command_logging_enabled, zoom, tabs, get_base_dir,
+    is_command_logging_enabled, zoom, tabs, get_base_dir, is_flatpak,
 };
 use crate::commands::load_command_templates;
 use crate::ui::editor::{apply_markdown_highlighting, track_notes_view};
@@ -259,10 +259,20 @@ pub fn create_shell_tab(
     let working_dir = get_base_dir();
     let working_dir_str = working_dir.to_str();
 
+    // Detect if running inside Flatpak
+    let in_flatpak = is_flatpak();
+
+    let shell_args: Vec<&str> = if in_flatpak {
+        vec!["flatpak-spawn", "--host", "--env=TERM=xterm-256color", "/bin/bash", "-l"]
+    } else {
+        vec!["/bin/bash"]
+    };
+
+
     let _ = terminal.spawn_async(
         vte4::PtyFlags::DEFAULT,
         working_dir_str,
-        &["/bin/bash"],
+        &shell_args,
         &env_refs,
         gtk::glib::SpawnFlags::DEFAULT,
         || {},
