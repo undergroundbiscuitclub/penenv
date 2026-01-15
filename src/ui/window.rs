@@ -14,12 +14,14 @@ use sysinfo::{System, Networks};
 use crate::config::{
     load_app_settings, get_keyboard_shortcuts,
     is_command_logging_enabled, get_file_path, set_base_dir, tabs,
+    is_browser_enabled, is_containers_enabled,
 };
 use crate::ui::dialogs::{show_base_dir_dialog, show_settings_dialog};
 use crate::ui::editor::{create_text_editor, create_readonly_viewer};
 use crate::ui::terminal::{create_shell_tab, create_split_view_tab, create_editable_tab_label,
                           focus_terminal_in_page, focus_terminal_in_split_view};
 use crate::ui::browser::{create_browser_tab, focus_url_entry_in_page};
+use crate::ui::container::create_container_tab;
 
 /// Builds and initializes the main application UI
 pub fn build_ui(app: &Application) {
@@ -98,18 +100,41 @@ fn create_main_window(app: &Application) {
         .build();
     split_mode_btn.add_css_class("flat");
 
-    let browser_btn = Button::builder()
-        .icon_name("web-browser-symbolic")
-        .tooltip_text("New Browser Tab (Ctrl+Shift+B)")
-        .build();
-    browser_btn.add_css_class("flat");
+    // Browser button (only if enabled)
+    let browser_btn = if is_browser_enabled() {
+        let btn = Button::builder()
+            .icon_name("web-browser-symbolic")
+            .tooltip_text("New Browser Tab (Ctrl+Shift+B)")
+            .build();
+        btn.add_css_class("flat");
+        Some(btn)
+    } else {
+        None
+    };
+
+    // Container button (only if enabled)
+    let container_btn = if is_containers_enabled() {
+        let btn = Button::builder()
+            .icon_name("application-x-executable-symbolic")
+            .tooltip_text("Container Management")
+            .build();
+        btn.add_css_class("flat");
+        Some(btn)
+    } else {
+        None
+    };
 
     header_bar.pack_start(&new_shell_btn);
     if let Some(ref nolog_btn) = new_shell_nolog_btn {
         header_bar.pack_start(nolog_btn);
     }
     header_bar.pack_start(&split_mode_btn);
-    header_bar.pack_start(&browser_btn);
+    if let Some(ref btn) = browser_btn {
+        header_bar.pack_start(btn);
+    }
+    if let Some(ref btn) = container_btn {
+        header_bar.pack_start(btn);
+    }
 
     // Right side: System monitors and settings
     let monitors_box = GtkBox::new(Orientation::Horizontal, 8);
@@ -144,7 +169,8 @@ fn create_main_window(app: &Application) {
     notebook.add_css_class("background");
 
     // Shell counter for tracking shell tab numbers
-    let shell_counter: Rc<RefCell<usize>> = Rc::new(RefCell::new(5));
+    // Start at 4, will be incremented as needed based on which tabs are enabled
+    let shell_counter: Rc<RefCell<usize>> = Rc::new(RefCell::new(4));
 
     // Browser counter for tracking browser tab numbers
     let browser_counter: Rc<RefCell<usize>> = Rc::new(RefCell::new(1));
@@ -163,9 +189,25 @@ fn create_main_window(app: &Application) {
         notebook.append_page(&log_page, Some(&create_tab_label("📜", "Log")));
     }
 
-    // Tab 4: First Shell
-    let shell_page = create_shell_tab(4, notebook.clone(), Some(shell_counter.clone()), Some(toast_overlay.clone()), true);
-    let shell_label = create_editable_tab_label("💻 Shell 4", &notebook);
+    // Tab: Containers (only if enabled)
+    if is_containers_enabled() {
+        let container_page = create_container_tab(
+            &notebook,
+            shell_counter.clone(),
+            Some(toast_overlay.clone()),
+            &window,
+            &cpu_frame,
+            &ram_frame,
+            &net_frame,
+        );
+        notebook.append_page(&container_page, Some(&create_tab_label("📦", "Containers")));
+    }
+
+    // First Shell tab
+    let first_shell_id = notebook.n_pages() + 1;
+    *shell_counter.borrow_mut() = first_shell_id as usize;
+    let shell_page = create_shell_tab(first_shell_id as usize, notebook.clone(), Some(shell_counter.clone()), Some(toast_overlay.clone()), true);
+    let shell_label = create_editable_tab_label(&format!("💻 Shell {}", first_shell_id), &notebook);
     notebook.append_page(&shell_page, Some(&shell_label));
 
     // Connect button handlers
@@ -193,13 +235,28 @@ fn create_main_window(app: &Application) {
         create_new_split_view_tab(&notebook_clone2, &shell_counter_clone2, &toast_clone2);
     });
 
-    // Browser button handler
-    let notebook_clone3 = notebook.clone();
-    let browser_counter_clone = Rc::clone(&browser_counter);
-    let toast_clone3 = toast_overlay.clone();
-    browser_btn.connect_clicked(move |_| {
-        create_new_browser_tab(&notebook_clone3, &browser_counter_clone, &toast_clone3);
-    });
+    // Browser button handler (only if enabled)
+    if let Some(ref btn) = browser_btn {
+        let notebook_clone3 = notebook.clone();
+        let browser_counter_clone = Rc::clone(&browser_counter);
+        let toast_clone3 = toast_overlay.clone();
+        btn.connect_clicked(move |_| {
+            create_new_browser_tab(&notebook_clone3, &browser_counter_clone, &toast_clone3);
+        });
+    }
+
+    // Container button handler - switch to containers tab (only if enabled)
+    if let Some(ref btn) = container_btn {
+        let notebook_clone4 = notebook.clone();
+        btn.connect_clicked(move |_| {
+            // Find containers tab index dynamically
+            let mut container_tab_index: u32 = 2; // After Targets, Notes
+            if is_command_logging_enabled() {
+                container_tab_index += 1; // After Log
+            }
+            notebook_clone4.set_current_page(Some(container_tab_index));
+        });
+    }
 
     // Settings button handler
     let window_clone = window.clone();
@@ -296,7 +353,7 @@ fn create_main_window(app: &Application) {
     });
 
     // Add global keyboard shortcuts
-    setup_keyboard_shortcuts(&window, &notebook, &new_shell_btn, &split_mode_btn, &browser_btn);
+    setup_keyboard_shortcuts(&window, &notebook, &new_shell_btn, &split_mode_btn, browser_btn.as_ref());
 
     // Status bar with creator and version (modern footer)
     let status_box = GtkBox::new(Orientation::Horizontal, 10);
@@ -749,13 +806,13 @@ fn setup_keyboard_shortcuts(
     notebook: &Notebook,
     new_shell_btn: &Button,
     split_mode_btn: &Button,
-    browser_btn: &Button,
+    browser_btn: Option<&Button>,
 ) {
     let key_controller = gtk::EventControllerKey::new();
     let notebook_clone = notebook.clone();
     let new_shell_btn_clone = new_shell_btn.clone();
     let split_mode_btn_clone = split_mode_btn.clone();
-    let browser_btn_clone = browser_btn.clone();
+    let browser_btn_clone = browser_btn.cloned();
 
     key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
         if modifier.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
@@ -778,10 +835,12 @@ fn setup_keyboard_shortcuts(
                     }
                 }
 
-                // Ctrl+Shift+B: New browser tab
+                // Ctrl+Shift+B: New browser tab (only if enabled)
                 if key_name == "B" {
-                    browser_btn_clone.emit_clicked();
-                    return gtk::glib::Propagation::Stop;
+                    if let Some(ref btn) = browser_btn_clone {
+                        btn.emit_clicked();
+                        return gtk::glib::Propagation::Stop;
+                    }
                 }
             }
 

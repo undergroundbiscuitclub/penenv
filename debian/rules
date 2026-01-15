@@ -11,6 +11,7 @@ override_dh_auto_install:
 	install -D -m 644 penenv.desktop debian/penenv/usr/share/applications/penenv.desktop
 	install -D -m 644 images/penenv-icon.png debian/penenv/usr/share/icons/hicolor/256x256/apps/penenv.png
 	install -D -m 644 images/penenv-icon.svg debian/penenv/usr/share/icons/hicolor/scalable/apps/penenv.svg
+	install -D -m 644 com.penenv.policy debian/penenv/usr/share/polkit-1/actions/com.penenv.policy
 
 override_dh_auto_clean:
 	cargo clean

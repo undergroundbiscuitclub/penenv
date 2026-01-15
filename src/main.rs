@@ -14,6 +14,7 @@
 
 mod config;
 mod commands;
+mod container;
 mod ui;
 
 use gtk4::prelude::*;
@@ -22,7 +23,7 @@ use gtk4::{Application, glib};
 fn main() -> glib::ExitCode {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    
+
     let app = Application::builder()
         .application_id("com.penenv.app")
         .build();
@@ -31,4 +32,3 @@ fn main() -> glib::ExitCode {
 
     app.run()
 }
-

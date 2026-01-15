@@ -107,6 +107,14 @@ pub struct AppSettings {
     pub notes_wrap_text: bool,
     #[serde(default)]
     pub browser_settings: BrowserSettings,
+    #[serde(default = "default_true")]
+    pub enable_browser: bool,
+    #[serde(default = "default_true")]
+    pub enable_containers: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -121,6 +129,8 @@ impl Default for AppSettings {
             terminal_scrollback_lines: 10000,
             notes_wrap_text: false,
             browser_settings: BrowserSettings::default(),
+            enable_browser: true,
+            enable_containers: true,
         }
     }
 }
@@ -144,7 +154,8 @@ pub mod tabs {
     pub const TARGETS: u32 = 0;
     pub const NOTES: u32 = 1;
     pub const LOG: u32 = 2;
-    pub const FIRST_SHELL: u32 = 3;
+    pub const CONTAINERS: u32 = 3;
+    pub const FIRST_SHELL: u32 = 4;
 }
 
 /// Zoom configuration
@@ -255,6 +266,16 @@ pub fn is_command_logging_enabled() -> bool {
 /// Checks if notes text wrapping is enabled
 pub fn is_notes_wrap_text_enabled() -> bool {
     APP_SETTINGS.with(|s| s.borrow().notes_wrap_text)
+}
+
+/// Checks if browser feature is enabled
+pub fn is_browser_enabled() -> bool {
+    APP_SETTINGS.with(|s| s.borrow().enable_browser)
+}
+
+/// Checks if containers feature is enabled
+pub fn is_containers_enabled() -> bool {
+    APP_SETTINGS.with(|s| s.borrow().enable_containers)
 }
 
 /// Gets the current text zoom scale

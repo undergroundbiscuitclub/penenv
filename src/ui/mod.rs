@@ -8,5 +8,6 @@ pub mod terminal;
 pub mod drawer;
 pub mod window;
 pub mod browser;
+pub mod container;
 
 pub use window::build_ui;

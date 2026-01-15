@@ -20,6 +20,36 @@ mkdir -p ~/.local/share/icons/hicolor/scalable/apps
 echo "Installing binary to ~/.local/bin/penenv..."
 cp target/release/penenv ~/.local/bin/
 
+# Install PolicyKit policy file (requires sudo for system-wide installation)
+# On immutable systems like Silverblue, /usr is read-only, so we use /etc instead
+POLKIT_DIR_USR="/usr/share/polkit-1/actions"
+POLKIT_DIR_ETC="/etc/polkit-1/actions"
+
+if [ -f "com.penenv.policy" ]; then
+    echo "Installing PolicyKit policy file..."
+
+    # Check if we're on an immutable system (Silverblue, Kinoite, etc.)
+    if [ -f "/run/ostree-booted" ]; then
+        echo "Detected OSTree-based system (Silverblue/Kinoite)..."
+        # Use /etc which is writable on immutable systems
+        sudo mkdir -p "$POLKIT_DIR_ETC"
+        sudo cp com.penenv.policy "$POLKIT_DIR_ETC/"
+        echo "PolicyKit policy installed to $POLKIT_DIR_ETC/com.penenv.policy"
+    elif [ -d "$POLKIT_DIR_USR" ] && [ -w "$POLKIT_DIR_USR" ] || sudo test -w "$POLKIT_DIR_USR"; then
+        # Standard mutable system with /usr/share writable
+        sudo cp com.penenv.policy "$POLKIT_DIR_USR/"
+        echo "PolicyKit policy installed to $POLKIT_DIR_USR/com.penenv.policy"
+    elif [ -d "$POLKIT_DIR_ETC" ] || sudo mkdir -p "$POLKIT_DIR_ETC" 2>/dev/null; then
+        # Fallback to /etc if /usr/share is not available
+        sudo cp com.penenv.policy "$POLKIT_DIR_ETC/"
+        echo "PolicyKit policy installed to $POLKIT_DIR_ETC/com.penenv.policy"
+    else
+        echo "⚠️  Could not find a writable PolicyKit directory"
+        echo "   You may need to manually install com.penenv.policy for the authentication dialog to work."
+        echo "   Try: sudo mkdir -p /etc/polkit-1/actions && sudo cp com.penenv.policy /etc/polkit-1/actions/"
+    fi
+fi
+
 # Copy icon
 echo "Installing icon..."
 cp images/penenv-icon.png ~/.local/share/icons/hicolor/256x256/apps/penenv.png
@@ -58,3 +88,6 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
 fi
+
+echo "ℹ️  Container management uses PolicyKit for authentication."
+echo "   You will see a native GNOME authentication dialog when managing containers."

@@ -163,17 +163,22 @@ fn create_fallback_browser_tab(
             return;
         }
         let url = normalize_url(&url_text);
-        // Use GTK's show_uri to open in default browser
-        if let Some(display) = gtk::gdk::Display::default() {
-            gtk::UriLauncher::new(&url).launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(e) = result {
-                    log::error!("Failed to open URL in external browser: {}", e);
-                }
-            });
-            let _ = display; // Keep display reference
+        // Use gio to open in default browser
+        let uri_file = gtk::gio::File::for_uri(&url);
+        let launcher = gtk::gio::AppInfo::default_for_uri_scheme(
+            if url.starts_with("https") { "https" } else { "http" }
+        );
+        if let Some(app) = launcher {
+            if let Err(e) = app.launch_uris(&[&url], None::<&gtk::gio::AppLaunchContext>) {
+                log::error!("Failed to open URL in external browser: {}", e);
+            }
         } else {
-            log::error!("No display available to open URL");
+            // Fallback: try xdg-open on Linux
+            if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                log::error!("Failed to open URL with xdg-open: {}", e);
+            }
         }
+        let _ = uri_file; // Suppress unused warning
     };
 
     let open_external_clone = open_external.clone();

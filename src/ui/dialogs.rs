@@ -4,7 +4,7 @@
 
 use gtk4::prelude::*;
 use gtk4::{self as gtk, Application, Box as GtkBox, Button, Label, Orientation, Entry,
-          ScrolledWindow, ListBox, Frame, CheckButton, Notebook};
+          ScrolledWindow, ListBox, Frame, CheckButton, Notebook, ComboBoxText, PasswordEntry};
 use libadwaita::{self as adw, prelude::*};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -13,9 +13,13 @@ use crate::config::{
     get_app_settings, save_app_settings, get_keyboard_shortcuts, key_to_display,
     get_text_zoom_scale, get_terminal_zoom_scale, is_command_logging_enabled, zoom,
     is_notes_wrap_text_enabled, get_browser_settings, BrowserSettings, ProxyType,
+    is_browser_enabled, is_containers_enabled,
 };
 use crate::commands::{load_custom_commands, save_custom_command, delete_custom_command,
                       update_custom_command, CommandTemplate};
+use crate::container::{
+    ContainerConfig, ContainerRuntime, load_container_config, save_container_config,
+};
 
 /// Shows the base directory selection dialog
 pub fn show_base_dir_dialog<F>(app: &Application, callback: F)
@@ -251,11 +255,33 @@ fn create_about_page() -> ScrolledWindow {
     scrolled
 }
 
+/// Settings tab indices for use with show_settings_dialog_at_tab
+#[allow(dead_code)]
+pub mod settings_tabs {
+    pub const GENERAL: u32 = 0;
+    pub const SHORTCUTS: u32 = 1;
+    pub const COMMANDS: u32 = 2;
+    pub const BROWSER: u32 = 3;
+    pub const CONTAINERS: u32 = 4;
+    pub const ABOUT: u32 = 5;
+}
+
 pub fn show_settings_dialog(
     parent: &adw::ApplicationWindow,
     cpu_frame: &Frame,
     ram_frame: &Frame,
     net_frame: &Frame
+) {
+    show_settings_dialog_at_tab(parent, cpu_frame, ram_frame, net_frame, settings_tabs::GENERAL);
+}
+
+/// Shows the settings dialog with a specific tab selected
+pub fn show_settings_dialog_at_tab(
+    parent: &adw::ApplicationWindow,
+    cpu_frame: &Frame,
+    ram_frame: &Frame,
+    net_frame: &Frame,
+    tab_index: u32,
 ) {
     let dialog = adw::Window::builder()
         .transient_for(parent)
@@ -298,10 +324,18 @@ pub fn show_settings_dialog(
     let browser_label = Label::new(Some("Browser"));
     notebook.append_page(&browser_page, Some(&browser_label));
 
+    // ===== CONTAINERS TAB =====
+    let containers_page = create_containers_settings_page();
+    let containers_label = Label::new(Some("Containers"));
+    notebook.append_page(&containers_page, Some(&containers_label));
+
     // ===== ABOUT TAB =====
     let about_page = create_about_page();
     let about_label = Label::new(Some("About"));
     notebook.append_page(&about_page, Some(&about_label));
+
+    // Set the requested tab
+    notebook.set_current_page(Some(tab_index));
 
     main_box.append(&notebook);
     dialog.set_content(Some(&main_box));
@@ -395,6 +429,37 @@ fn create_general_settings_page(cpu_frame: &Frame, ram_frame: &Frame, net_frame:
     logging_box.append(&logging_check);
 
     page.append(&logging_box);
+
+    // Features Group
+    let features_heading = Label::new(Some("Features"));
+    features_heading.add_css_class("title-4");
+    features_heading.set_halign(gtk::Align::Start);
+    features_heading.set_margin_bottom(12);
+    page.append(&features_heading);
+
+    let features_box = GtkBox::new(Orientation::Vertical, 8);
+    features_box.set_margin_start(12);
+    features_box.set_margin_bottom(24);
+
+    let browser_check = CheckButton::with_label("Enable Browser Tab (requires restart)");
+    browser_check.set_active(is_browser_enabled());
+    browser_check.connect_toggled(move |check| {
+        let mut settings = get_app_settings();
+        settings.enable_browser = check.is_active();
+        let _ = save_app_settings(&settings);
+    });
+    features_box.append(&browser_check);
+
+    let containers_check = CheckButton::with_label("Enable Containers Tab (requires restart)");
+    containers_check.set_active(is_containers_enabled());
+    containers_check.connect_toggled(move |check| {
+        let mut settings = get_app_settings();
+        settings.enable_containers = check.is_active();
+        let _ = save_app_settings(&settings);
+    });
+    features_box.append(&containers_check);
+
+    page.append(&features_box);
 
     // Terminal Group
     let terminal_heading = Label::new(Some("Terminal Settings"));
@@ -1427,4 +1492,320 @@ where
     main_box.append(&content);
     dialog.set_content(Some(&main_box));
     dialog.present();
+}
+
+/// Creates the containers settings page for the settings notebook
+fn create_containers_settings_page() -> ScrolledWindow {
+    let scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(500);
+
+    let page = GtkBox::new(Orientation::Vertical, 24);
+    page.set_margin_top(24);
+    page.set_margin_bottom(24);
+    page.set_margin_start(12);
+    page.set_margin_end(12);
+
+    let config = load_container_config();
+
+    // === Runtime Section ===
+    let runtime_heading = Label::new(Some("Container Runtime"));
+    runtime_heading.add_css_class("title-4");
+    runtime_heading.set_halign(gtk::Align::Start);
+    runtime_heading.set_margin_bottom(12);
+    page.append(&runtime_heading);
+
+    let runtime_box = GtkBox::new(Orientation::Vertical, 8);
+    runtime_box.set_margin_start(12);
+    runtime_box.set_margin_bottom(24);
+
+    let runtime_row = GtkBox::new(Orientation::Horizontal, 12);
+    let runtime_label = Label::new(Some("Runtime:"));
+    runtime_label.set_width_request(120);
+    runtime_label.set_halign(gtk::Align::Start);
+
+    let runtime_combo = ComboBoxText::new();
+    runtime_combo.append_text("Podman");
+    runtime_combo.append_text("Docker");
+    runtime_combo.set_active(Some(match config.runtime {
+        ContainerRuntime::Podman => 0,
+        ContainerRuntime::Docker => 1,
+    }));
+    runtime_combo.set_hexpand(true);
+
+    runtime_row.append(&runtime_label);
+    runtime_row.append(&runtime_combo);
+    runtime_box.append(&runtime_row);
+
+    let runtime_hint = Label::new(Some("Podman may require sudo for full networking support"));
+    runtime_hint.add_css_class("dim-label");
+    runtime_hint.set_halign(gtk::Align::Start);
+    runtime_box.append(&runtime_hint);
+
+    page.append(&runtime_box);
+
+    // === Image Names Section ===
+    let images_heading = Label::new(Some("Image Names"));
+    images_heading.add_css_class("title-4");
+    images_heading.set_halign(gtk::Align::Start);
+    images_heading.set_margin_bottom(12);
+    page.append(&images_heading);
+
+    let images_box = GtkBox::new(Orientation::Vertical, 8);
+    images_box.set_margin_start(12);
+    images_box.set_margin_bottom(24);
+
+    let base_image_row = GtkBox::new(Orientation::Horizontal, 12);
+    let base_image_label = Label::new(Some("Base Image:"));
+    base_image_label.set_width_request(120);
+    base_image_label.set_halign(gtk::Align::Start);
+    let base_image_entry = Entry::builder()
+        .text(&config.image_name)
+        .placeholder_text("Base image name (e.g., kali-build)")
+        .hexpand(true)
+        .build();
+    base_image_row.append(&base_image_label);
+    base_image_row.append(&base_image_entry);
+    images_box.append(&base_image_row);
+
+    let master_image_row = GtkBox::new(Orientation::Horizontal, 12);
+    let master_image_label = Label::new(Some("Master Image:"));
+    master_image_label.set_width_request(120);
+    master_image_label.set_halign(gtk::Align::Start);
+    let master_image_entry = Entry::builder()
+        .text(&config.master_image)
+        .placeholder_text("Master image name (e.g., kali-master)")
+        .hexpand(true)
+        .build();
+    master_image_row.append(&master_image_label);
+    master_image_row.append(&master_image_entry);
+    images_box.append(&master_image_row);
+
+    let dockerfile_row = GtkBox::new(Orientation::Horizontal, 12);
+    let dockerfile_label = Label::new(Some("Dockerfile:"));
+    dockerfile_label.set_width_request(120);
+    dockerfile_label.set_halign(gtk::Align::Start);
+    let dockerfile_entry = Entry::builder()
+        .text(&config.dockerfile_path)
+        .placeholder_text("Path to Dockerfile")
+        .hexpand(true)
+        .build();
+    dockerfile_row.append(&dockerfile_label);
+    dockerfile_row.append(&dockerfile_entry);
+    images_box.append(&dockerfile_row);
+
+    page.append(&images_box);
+
+    // === SSH Section ===
+    let ssh_heading = Label::new(Some("SSH Configuration"));
+    ssh_heading.add_css_class("title-4");
+    ssh_heading.set_halign(gtk::Align::Start);
+    ssh_heading.set_margin_bottom(12);
+    page.append(&ssh_heading);
+
+    let ssh_box = GtkBox::new(Orientation::Vertical, 8);
+    ssh_box.set_margin_start(12);
+    ssh_box.set_margin_bottom(24);
+
+    let ssh_key_row = GtkBox::new(Orientation::Horizontal, 12);
+    let ssh_key_label = Label::new(Some("SSH Public Key:"));
+    ssh_key_label.set_width_request(120);
+    ssh_key_label.set_halign(gtk::Align::Start);
+    let ssh_key_entry = Entry::builder()
+        .text(&config.ssh_pubkey_path)
+        .placeholder_text("Path to SSH public key")
+        .hexpand(true)
+        .build();
+    ssh_key_row.append(&ssh_key_label);
+    ssh_key_row.append(&ssh_key_entry);
+    ssh_box.append(&ssh_key_row);
+
+    page.append(&ssh_box);
+
+    // === Resource Limits Section ===
+    let resources_heading = Label::new(Some("Resource Limits"));
+    resources_heading.add_css_class("title-4");
+    resources_heading.set_halign(gtk::Align::Start);
+    resources_heading.set_margin_bottom(12);
+    page.append(&resources_heading);
+
+    let resources_box = GtkBox::new(Orientation::Vertical, 8);
+    resources_box.set_margin_start(12);
+    resources_box.set_margin_bottom(24);
+
+    let memory_row = GtkBox::new(Orientation::Horizontal, 12);
+    let memory_label = Label::new(Some("Memory Limit:"));
+    memory_label.set_width_request(120);
+    memory_label.set_halign(gtk::Align::Start);
+    let memory_entry = Entry::builder()
+        .text(&config.memory_limit)
+        .placeholder_text("Memory limit (e.g., 8g)")
+        .hexpand(true)
+        .build();
+    memory_row.append(&memory_label);
+    memory_row.append(&memory_entry);
+    resources_box.append(&memory_row);
+
+    let cpu_row = GtkBox::new(Orientation::Horizontal, 12);
+    let cpu_label = Label::new(Some("CPU Limit:"));
+    cpu_label.set_width_request(120);
+    cpu_label.set_halign(gtk::Align::Start);
+    let cpu_entry = Entry::builder()
+        .text(&config.cpu_limit.to_string())
+        .placeholder_text("CPU limit (number of CPUs)")
+        .hexpand(true)
+        .build();
+    cpu_row.append(&cpu_label);
+    cpu_row.append(&cpu_entry);
+    resources_box.append(&cpu_row);
+
+    let data_row = GtkBox::new(Orientation::Horizontal, 12);
+    let data_label = Label::new(Some("Data Directory:"));
+    data_label.set_width_request(120);
+    data_label.set_halign(gtk::Align::Start);
+    let data_mapping_entry = Entry::builder()
+        .text(&config.data_mapping)
+        .placeholder_text("Directory to map to /data in container")
+        .hexpand(true)
+        .build();
+    data_row.append(&data_label);
+    data_row.append(&data_mapping_entry);
+    resources_box.append(&data_row);
+
+    page.append(&resources_box);
+
+    // === VNC Section ===
+    let vnc_heading = Label::new(Some("VNC Configuration"));
+    vnc_heading.add_css_class("title-4");
+    vnc_heading.set_halign(gtk::Align::Start);
+    vnc_heading.set_margin_bottom(12);
+    page.append(&vnc_heading);
+
+    let vnc_box = GtkBox::new(Orientation::Vertical, 8);
+    vnc_box.set_margin_start(12);
+    vnc_box.set_margin_bottom(24);
+
+    let vnc_expose_check = CheckButton::with_label("Expose VNC port outside container");
+    vnc_expose_check.set_active(config.vnc_expose);
+    vnc_box.append(&vnc_expose_check);
+
+    let vnc_port_row = GtkBox::new(Orientation::Horizontal, 12);
+    let vnc_port_label = Label::new(Some("VNC Port:"));
+    vnc_port_label.set_width_request(120);
+    vnc_port_label.set_halign(gtk::Align::Start);
+    let vnc_port_entry = Entry::builder()
+        .text(&config.vnc_port.to_string())
+        .placeholder_text("VNC Port (e.g., 5900)")
+        .hexpand(true)
+        .build();
+    vnc_port_row.append(&vnc_port_label);
+    vnc_port_row.append(&vnc_port_entry);
+    vnc_box.append(&vnc_port_row);
+
+    let vnc_password_row = GtkBox::new(Orientation::Horizontal, 12);
+    let vnc_password_label = Label::new(Some("VNC Password:"));
+    vnc_password_label.set_width_request(120);
+    vnc_password_label.set_halign(gtk::Align::Start);
+    let vnc_password_entry = PasswordEntry::builder()
+        .text(&config.vnc_password)
+        .show_peek_icon(true)
+        .hexpand(true)
+        .build();
+    vnc_password_row.append(&vnc_password_label);
+    vnc_password_row.append(&vnc_password_entry);
+    vnc_box.append(&vnc_password_row);
+
+    let vnc_display_row = GtkBox::new(Orientation::Horizontal, 12);
+    let vnc_display_label = Label::new(Some("Display:"));
+    vnc_display_label.set_width_request(120);
+    vnc_display_label.set_halign(gtk::Align::Start);
+    let vnc_display_entry = Entry::builder()
+        .text(&config.vnc_display)
+        .placeholder_text("Display resolution (e.g., 1920x1080)")
+        .hexpand(true)
+        .build();
+    vnc_display_row.append(&vnc_display_label);
+    vnc_display_row.append(&vnc_display_entry);
+    vnc_box.append(&vnc_display_row);
+
+    page.append(&vnc_box);
+
+    // === Save Button ===
+    let button_box = GtkBox::new(Orientation::Horizontal, 12);
+    button_box.set_halign(gtk::Align::End);
+    button_box.set_margin_top(12);
+
+    let save_btn = Button::with_label("Save Container Settings");
+    save_btn.add_css_class("suggested-action");
+
+    // Clone entries for save handler
+    let runtime_combo_clone = runtime_combo.clone();
+    let base_image_entry_clone = base_image_entry.clone();
+    let master_image_entry_clone = master_image_entry.clone();
+    let dockerfile_entry_clone = dockerfile_entry.clone();
+    let ssh_key_entry_clone = ssh_key_entry.clone();
+    let memory_entry_clone = memory_entry.clone();
+    let cpu_entry_clone = cpu_entry.clone();
+    let data_mapping_entry_clone = data_mapping_entry.clone();
+    let vnc_expose_check_clone = vnc_expose_check.clone();
+    let vnc_port_entry_clone = vnc_port_entry.clone();
+    let vnc_password_entry_clone = vnc_password_entry.clone();
+    let vnc_display_entry_clone = vnc_display_entry.clone();
+
+    save_btn.connect_clicked(move |btn| {
+        let new_config = ContainerConfig {
+            runtime: match runtime_combo_clone.active() {
+                Some(0) => ContainerRuntime::Podman,
+                _ => ContainerRuntime::Docker,
+            },
+            image_name: base_image_entry_clone.text().to_string(),
+            master_image: master_image_entry_clone.text().to_string(),
+            dockerfile_path: dockerfile_entry_clone.text().to_string(),
+            ssh_pubkey_path: ssh_key_entry_clone.text().to_string(),
+            data_mapping: data_mapping_entry_clone.text().to_string(),
+            vnc_expose: vnc_expose_check_clone.is_active(),
+            vnc_port: vnc_port_entry_clone.text().parse().unwrap_or(5900),
+            vnc_password: vnc_password_entry_clone.text().to_string(),
+            vnc_display: vnc_display_entry_clone.text().to_string(),
+            vnc_depth: 16,
+            novnc_port: 1337,
+            memory_limit: memory_entry_clone.text().to_string(),
+            cpu_limit: cpu_entry_clone.text().parse().unwrap_or(10),
+        };
+
+        match save_container_config(&new_config) {
+            Ok(_) => {
+                log::info!("Container settings saved");
+                // Show a brief visual feedback
+                btn.set_label("Saved!");
+                btn.set_sensitive(false);
+                let btn_clone = btn.clone();
+                gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                    btn_clone.set_label("Save Container Settings");
+                    btn_clone.set_sensitive(true);
+                });
+            }
+            Err(e) => {
+                log::error!("Failed to save container settings: {}", e);
+                btn.set_label("Save Failed!");
+                let btn_clone = btn.clone();
+                gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                    btn_clone.set_label("Save Container Settings");
+                });
+            }
+        }
+    });
+
+    button_box.append(&save_btn);
+    page.append(&button_box);
+
+    content.set_child(Some(&page));
+    scrolled.set_child(Some(&content));
+
+    scrolled
 }

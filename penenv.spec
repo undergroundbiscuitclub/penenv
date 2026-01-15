@@ -17,6 +17,7 @@ Requires:       gtk4
 Requires:       libadwaita
 Requires:       vte291-gtk4
 Requires:       bash
+Requires:       polkit
 
 %description
 PenEnv is a modern GTK4 desktop application for managing penetration testing
@@ -36,11 +37,13 @@ mkdir -p $RPM_BUILD_ROOT%{_bindir}
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/applications
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/256x256/apps
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/scalable/apps
+mkdir -p $RPM_BUILD_ROOT%{_datadir}/polkit-1/actions
 
 install -m 755 target/release/penenv $RPM_BUILD_ROOT%{_bindir}/penenv
 install -m 644 penenv.desktop $RPM_BUILD_ROOT%{_datadir}/applications/penenv.desktop
 install -m 644 images/penenv-icon.png $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/256x256/apps/penenv.png
 install -m 644 images/penenv-icon.svg $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/scalable/apps/penenv.svg
+install -m 644 com.penenv.policy $RPM_BUILD_ROOT%{_datadir}/polkit-1/actions/com.penenv.policy
 
 %files
 %license LICENSE
@@ -49,6 +52,7 @@ install -m 644 images/penenv-icon.svg $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/s
 %{_datadir}/applications/penenv.desktop
 %{_datadir}/icons/hicolor/256x256/apps/penenv.png
 %{_datadir}/icons/hicolor/scalable/apps/penenv.svg
+%{_datadir}/polkit-1/actions/com.penenv.policy
 
 %post
 gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || :

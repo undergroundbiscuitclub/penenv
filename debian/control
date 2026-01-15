@@ -17,7 +17,8 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
          libgtk-4-1,
          libadwaita-1-0,
          libvte-2.91-gtk4-0,
-         bash
+         bash,
+         policykit-1
 Description: Pentesting environment with integrated shells and note-taking
  PenEnv is a modern GTK4 desktop application for managing penetration testing
  environments with integrated shells, note-taking, and target management.
