@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::process::{Command, Output};
 use std::path::PathBuf;
 use std::fs;
-use crate::config::{get_config_dir, get_base_dir};
+use crate::config::{get_config_dir, get_base_dir, is_flatpak};
 
 /// Container runtime choice - podman or docker
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
@@ -269,17 +269,31 @@ impl ContainerManager {
     /// - Rootful: uses pkexec for privilege escalation
     /// - Rootless: runs directly without elevation
     fn base_command(&self) -> Command {
+        let in_flatpak = is_flatpak();
+
         match self.config.runtime {
             ContainerRuntime::Docker => {
                 // Docker always runs directly - it uses socket permissions
                 // For rootless Docker, the CLI auto-detects the user socket
-                let mut cmd = Command::new(self.config.runtime.command());
+                let mut cmd = if in_flatpak {
+                    let mut c = Command::new("flatpak-spawn");
+                    c.arg("--host");
+                    c.arg(self.config.runtime.command());
+                    c
+                } else {
+                    Command::new(self.config.runtime.command())
+                };
                 if self.config.is_rootless() {
                     // Ensure Docker uses the rootless socket if available
                     if let Ok(xdg_runtime) = std::env::var("XDG_RUNTIME_DIR") {
                         let rootless_socket = format!("{}/docker.sock", xdg_runtime);
                         if std::path::Path::new(&rootless_socket).exists() {
-                            cmd.env("DOCKER_HOST", format!("unix://{}", rootless_socket));
+                            if in_flatpak {
+                                cmd.arg("--env");
+                                cmd.arg(format!("DOCKER_HOST=unix://{}", rootless_socket));
+                            } else {
+                                cmd.env("DOCKER_HOST", format!("unix://{}", rootless_socket));
+                            }
                         }
                     }
                 }
@@ -287,12 +301,24 @@ impl ContainerManager {
             }
             ContainerRuntime::Podman => {
                 if self.config.is_rootful() {
-                    let mut cmd = Command::new("pkexec");
-                    cmd.arg(self.config.runtime.command());
-                    cmd
+                    if in_flatpak {
+                        let mut cmd = Command::new("flatpak-spawn");
+                        cmd.args(["--host", "pkexec", self.config.runtime.command()]);
+                        cmd
+                    } else {
+                        let mut cmd = Command::new("pkexec");
+                        cmd.arg(self.config.runtime.command());
+                        cmd
+                    }
                 } else {
                     // Rootless mode - run directly without sudo/pkexec
-                    Command::new(self.config.runtime.command())
+                    if in_flatpak {
+                        let mut cmd = Command::new("flatpak-spawn");
+                        cmd.args(["--host", self.config.runtime.command()]);
+                        cmd
+                    } else {
+                        Command::new(self.config.runtime.command())
+                    }
                 }
             }
         }
@@ -300,7 +326,13 @@ impl ContainerManager {
 
     /// Get a command without privilege escalation (for rootless operations)
     fn rootless_command(&self) -> Command {
-        Command::new(self.config.runtime.command())
+        if is_flatpak() {
+            let mut cmd = Command::new("flatpak-spawn");
+            cmd.args(["--host", self.config.runtime.command()]);
+            cmd
+        } else {
+            Command::new(self.config.runtime.command())
+        }
     }
 
     /// Execute a command and return the output
@@ -318,26 +350,42 @@ impl ContainerManager {
     /// Check if the container runtime is available (without triggering auth dialogs)
     /// This just checks if the runtime binary exists
     pub fn is_runtime_available(&self) -> bool {
-        Command::new(self.config.runtime.command())
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        if is_flatpak() {
+            Command::new("flatpak-spawn")
+                .args(["--host", self.config.runtime.command(), "--version"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        } else {
+            Command::new(self.config.runtime.command())
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
     }
 
     /// Check if rootless mode is available and working
     pub fn is_rootless_available(&self) -> bool {
+        let in_flatpak = is_flatpak();
+
         match self.config.runtime {
             ContainerRuntime::Podman => {
                 // Podman has a specific field to check for rootless mode
-                Command::new(self.config.runtime.command())
-                    .args(["info", "--format", "{{.Host.Security.Rootless}}"])
-                    .output()
-                    .map(|o| {
-                        o.status.success() &&
-                        String::from_utf8_lossy(&o.stdout).trim() == "true"
-                    })
-                    .unwrap_or(false)
+                let output = if in_flatpak {
+                    Command::new("flatpak-spawn")
+                        .args(["--host", self.config.runtime.command(), "info", "--format", "{{.Host.Security.Rootless}}"])
+                        .output()
+                } else {
+                    Command::new(self.config.runtime.command())
+                        .args(["info", "--format", "{{.Host.Security.Rootless}}"])
+                        .output()
+                };
+                output.map(|o| {
+                    o.status.success() &&
+                    String::from_utf8_lossy(&o.stdout).trim() == "true"
+                })
+                .unwrap_or(false)
             }
             ContainerRuntime::Docker => {
                 // Docker rootless mode uses a socket in XDG_RUNTIME_DIR
@@ -346,23 +394,38 @@ impl ContainerManager {
                     let rootless_socket = format!("{}/docker.sock", xdg_runtime);
                     if std::path::Path::new(&rootless_socket).exists() {
                         // Try to connect to the rootless socket
-                        let mut cmd = Command::new(self.config.runtime.command());
-                        cmd.env("DOCKER_HOST", format!("unix://{}", rootless_socket));
-                        cmd.args(["info", "--format", "{{.ID}}"]);
-                        return cmd.output()
+                        let output = if in_flatpak {
+                            Command::new("flatpak-spawn")
+                                .args(["--host", self.config.runtime.command()])
+                                .arg(format!("--env=DOCKER_HOST=unix://{}", rootless_socket))
+                                .args(["info", "--format", "{{.ID}}"])
+                                .output()
+                        } else {
+                            let mut cmd = Command::new(self.config.runtime.command());
+                            cmd.env("DOCKER_HOST", format!("unix://{}", rootless_socket));
+                            cmd.args(["info", "--format", "{{.ID}}"]);
+                            cmd.output()
+                        };
+                        return output
                             .map(|o| o.status.success())
                             .unwrap_or(false);
                     }
                 }
                 // Alternative: check if docker context shows rootless
-                Command::new(self.config.runtime.command())
-                    .args(["context", "ls", "--format", "{{.Name}}"])
-                    .output()
-                    .map(|o| {
-                        o.status.success() &&
-                        String::from_utf8_lossy(&o.stdout).contains("rootless")
-                    })
-                    .unwrap_or(false)
+                let output = if in_flatpak {
+                    Command::new("flatpak-spawn")
+                        .args(["--host", self.config.runtime.command(), "context", "ls", "--format", "{{.Name}}"])
+                        .output()
+                } else {
+                    Command::new(self.config.runtime.command())
+                        .args(["context", "ls", "--format", "{{.Name}}"])
+                        .output()
+                };
+                output.map(|o| {
+                    o.status.success() &&
+                    String::from_utf8_lossy(&o.stdout).contains("rootless")
+                })
+                .unwrap_or(false)
             }
         }
     }
@@ -370,6 +433,8 @@ impl ContainerManager {
     /// Check if rootful mode is available (requires testing with pkexec for Podman)
     /// Note: For Podman, this may trigger an authentication dialog
     pub fn is_rootful_available(&self) -> bool {
+        let in_flatpak = is_flatpak();
+
         match self.config.runtime {
             ContainerRuntime::Docker => {
                 // Docker rootful mode uses the system daemon at /var/run/docker.sock
@@ -377,10 +442,19 @@ impl ContainerManager {
                 // Check if we can connect to the system docker socket
                 let system_socket = "/var/run/docker.sock";
                 if std::path::Path::new(system_socket).exists() {
-                    let mut cmd = Command::new(self.config.runtime.command());
-                    cmd.env("DOCKER_HOST", format!("unix://{}", system_socket));
-                    cmd.args(["info", "--format", "{{.ID}}"]);
-                    return cmd.output()
+                    let output = if in_flatpak {
+                        Command::new("flatpak-spawn")
+                            .args(["--host", self.config.runtime.command()])
+                            .arg(format!("--env=DOCKER_HOST=unix://{}", system_socket))
+                            .args(["info", "--format", "{{.ID}}"])
+                            .output()
+                    } else {
+                        let mut cmd = Command::new(self.config.runtime.command());
+                        cmd.env("DOCKER_HOST", format!("unix://{}", system_socket));
+                        cmd.args(["info", "--format", "{{.ID}}"]);
+                        cmd.output()
+                    };
+                    return output
                         .map(|o| o.status.success())
                         .unwrap_or(false);
                 }
@@ -388,10 +462,16 @@ impl ContainerManager {
             }
             ContainerRuntime::Podman => {
                 // For Podman, check if we can run with pkexec
-                Command::new("pkexec")
-                    .args([self.config.runtime.command(), "--version"])
-                    .output()
-                    .map(|o| o.status.success())
+                let output = if in_flatpak {
+                    Command::new("flatpak-spawn")
+                        .args(["--host", "pkexec", self.config.runtime.command(), "--version"])
+                        .output()
+                } else {
+                    Command::new("pkexec")
+                        .args([self.config.runtime.command(), "--version"])
+                        .output()
+                };
+                output.map(|o| o.status.success())
                     .unwrap_or(false)
             }
         }
@@ -535,11 +615,18 @@ impl ContainerManager {
 
             // Generate new SSH key
             let privkey_path = self.get_ssh_privkey_path();
+            let privkey_str = privkey_path.to_str().unwrap_or("");
 
-            let status = Command::new("ssh-keygen")
-                .args(["-t", "ed25519", "-f", privkey_path.to_str().unwrap_or(""), "-N", ""])
-                .status()
-                .map_err(|e| ContainerError::with_details("Failed to generate SSH key", e))?;
+            let status = if is_flatpak() {
+                Command::new("flatpak-spawn")
+                    .args(["--host", "ssh-keygen", "-t", "ed25519", "-f", privkey_str, "-N", ""])
+                    .status()
+            } else {
+                Command::new("ssh-keygen")
+                    .args(["-t", "ed25519", "-f", privkey_str, "-N", ""])
+                    .status()
+            }
+            .map_err(|e| ContainerError::with_details("Failed to generate SSH key", e))?;
 
             if !status.success() {
                 return Err(ContainerError::new("SSH key generation failed"));
@@ -882,6 +969,7 @@ impl ContainerManager {
     /// Get SSH connection command for a container
     /// In rootful mode: connects via container IP
     /// In rootless mode: connects via localhost with port forwarding
+    /// Note: Returns a plain host command - Flatpak wrapping is handled by terminal spawning
     pub fn get_ssh_command(&self, name: &str) -> ContainerResult<String> {
         let key_path = self.get_ssh_privkey_path();
         let key_path_str = key_path.to_string_lossy();
@@ -908,16 +996,19 @@ impl ContainerManager {
     /// Get SSH connection arguments for spawning in terminal
     /// In rootful mode: connects via container IP
     /// In rootless mode: connects via localhost with port forwarding
+    /// Note: Returns plain host command args - Flatpak wrapping is handled by terminal spawning
     pub fn get_ssh_args(&self, name: &str) -> ContainerResult<Vec<String>> {
         let key_path = self.get_ssh_privkey_path();
         let key_path_str = key_path.to_string_lossy().to_string();
+
+        let mut args = Vec::new();
+        args.push("ssh".to_string());
 
         if self.config.is_rootless() {
             // Rootless: use port forwarding to localhost
             let port = self.get_container_ssh_port(name)?
                 .ok_or_else(|| ContainerError::new("Container has no SSH port mapping"))?;
-            Ok(vec![
-                "ssh".to_string(),
+            args.extend([
                 "-o".to_string(), "IdentitiesOnly=yes".to_string(),
                 "-o".to_string(), "StrictHostKeyChecking=no".to_string(),
                 "-o".to_string(), "UserKnownHostsFile=/dev/null".to_string(),
@@ -926,25 +1017,27 @@ impl ContainerManager {
                 "root@localhost".to_string(),
                 "-X".to_string(),
                 "-L".to_string(), "8181:127.0.0.1:8181".to_string(),
-            ])
+            ]);
         } else {
             // Rootful: use container IP with X11 forwarding
             let ip = self.get_container_ip(name)?
                 .ok_or_else(|| ContainerError::new("Container has no IP address"))?;
-            Ok(vec![
-                "ssh".to_string(),
+            args.extend([
                 "-o".to_string(), "IdentitiesOnly=yes".to_string(),
                 "-o".to_string(), "StrictHostKeyChecking=no".to_string(),
                 "-i".to_string(), key_path_str.clone(),
                 format!("root@{}", ip),
                 "-X".to_string(),
                 "-L".to_string(), "8181:127.0.0.1:8181".to_string(),
-            ])
+            ]);
         }
+
+        Ok(args)
     }
 
     /// Get podman/docker exec command for direct container access (no SSH needed)
     /// This is the preferred method in rootless mode when prefer_exec is true
+    /// Note: Returns a plain host command - Flatpak wrapping is handled by terminal spawning
     pub fn get_exec_command(&self, name: &str) -> String {
         match self.config.runtime {
             ContainerRuntime::Docker => {
@@ -963,6 +1056,7 @@ impl ContainerManager {
     /// Get exec arguments for spawning in terminal
     /// For Docker rootful mode or Podman rootful mode, this runs the exec directly
     /// (Docker uses socket permissions, Podman rootful containers are accessible to user after creation)
+    /// Note: Returns plain host command args - Flatpak wrapping is handled by terminal spawning
     pub fn get_exec_args(&self, name: &str) -> Vec<String> {
         let mut args = Vec::new();
 
@@ -1014,20 +1108,35 @@ impl ContainerManager {
 
     /// Clear known hosts entry for container IP/localhost (for SSH reconnection)
     pub fn clear_ssh_known_host(&self, name: &str) -> ContainerResult<()> {
+        let in_flatpak = is_flatpak();
+
         if self.config.is_rootless() {
             // For rootless, clear localhost entries for our port range
             // This is less precise but avoids accumulating stale entries
             if let Ok(Some(port)) = self.get_container_ssh_port(name) {
-                let _ = Command::new("ssh-keygen")
-                    .args(["-R", &format!("[localhost]:{}", port)])
-                    .output();
+                let host_arg = format!("[localhost]:{}", port);
+                if in_flatpak {
+                    let _ = Command::new("flatpak-spawn")
+                        .args(["--host", "ssh-keygen", "-R", &host_arg])
+                        .output();
+                } else {
+                    let _ = Command::new("ssh-keygen")
+                        .args(["-R", &host_arg])
+                        .output();
+                }
             }
         } else {
             // Rootful: clear by IP
             if let Some(ip) = self.get_container_ip(name)? {
-                let _ = Command::new("ssh-keygen")
-                    .args(["-R", &ip])
-                    .output();
+                if in_flatpak {
+                    let _ = Command::new("flatpak-spawn")
+                        .args(["--host", "ssh-keygen", "-R", &ip])
+                        .output();
+                } else {
+                    let _ = Command::new("ssh-keygen")
+                        .args(["-R", &ip])
+                        .output();
+                }
             }
         }
         Ok(())

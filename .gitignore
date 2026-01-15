@@ -36,6 +36,7 @@ project_idea.md
 /target/debian/
 penenv.flatpak
 /build-dir
+/repo
 
 # OS
 .DS_Store
