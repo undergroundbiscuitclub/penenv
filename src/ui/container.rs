@@ -6,6 +6,7 @@
 //! - Create new containers from base or master image
 //! - Start/stop/remove containers
 //! - Connect to containers via SSH in a new shell tab
+//! - Split view with notes and container shell
 //! - Build images from Dockerfile
 //! - Commit containers to master image
 //! - Configure container settings
@@ -13,9 +14,10 @@
 use gtk4::prelude::*;
 use gtk4::{
     Box as GtkBox, Button, Label, ListBox, ListBoxRow, Orientation,
-    ScrolledWindow, Separator, Entry, CheckButton, Frame,
+    ScrolledWindow, Separator, Entry, CheckButton, Frame, Paned, TextView,
     ResponseType,
 };
+use std::fs;
 use libadwaita::{self as adw, prelude::*};
 use vte4::prelude::*;
 use std::cell::RefCell;
@@ -440,11 +442,21 @@ fn create_container_row(
     // Connect button (SSH into container)
     let connect_btn = Button::builder()
         .icon_name("utilities-terminal-symbolic")
-        .tooltip_text("Connect via SSH")
+        .tooltip_text("Connect (shell only)")
         .build();
     connect_btn.add_css_class("flat");
     if !is_running {
         connect_btn.set_sensitive(false);
+    }
+
+    // Split view button (notes + shell)
+    let split_btn = Button::builder()
+        .icon_name("view-dual-symbolic")
+        .tooltip_text("Connect with Notes (split view)")
+        .build();
+    split_btn.add_css_class("flat");
+    if !is_running {
+        split_btn.set_sensitive(false);
     }
 
     // Start/Stop button
@@ -476,6 +488,7 @@ fn create_container_row(
     delete_btn.add_css_class("flat");
 
     actions_box.append(&connect_btn);
+    actions_box.append(&split_btn);
     actions_box.append(&start_stop_btn);
     actions_box.append(&commit_btn);
     actions_box.append(&delete_btn);
@@ -503,6 +516,24 @@ fn create_container_row(
             &notebook_clone,
             &shell_counter_clone,
             toast_clone.as_ref(),
+            false, // not split view
+        );
+    });
+
+    // Split view handler - opens notes + shell in new tab
+    let name_split = container_name.clone();
+    let manager_split = manager.clone();
+    let notebook_split = notebook.clone();
+    let shell_counter_split = shell_counter.clone();
+    let toast_split = toast_overlay.clone();
+    split_btn.connect_clicked(move |_| {
+        connect_to_container(
+            &name_split,
+            &manager_split,
+            &notebook_split,
+            &shell_counter_split,
+            toast_split.as_ref(),
+            true, // split view
         );
     });
 
@@ -589,12 +620,14 @@ fn create_container_row(
 }
 
 /// Connect to a container via SSH in a new shell tab
+/// If split_view is true, creates a split view with notes on the left
 fn connect_to_container(
     name: &str,
     manager: &Rc<RefCell<ContainerManager>>,
     notebook: &gtk4::Notebook,
     shell_counter: &Rc<RefCell<usize>>,
     toast_overlay: Option<&adw::ToastOverlay>,
+    split_view: bool,
 ) {
     let mgr = manager.borrow();
     let is_rootless = mgr.config.is_rootless();
@@ -617,15 +650,20 @@ fn connect_to_container(
                 *counter
             };
 
-            let tab_icon = if is_exec { "📦" } else { "🔗" };
+            let tab_icon = if split_view { "📝" } else if is_exec { "📦" } else { "🔗" };
             let tab_name = format!("{} {}", tab_icon, name);
 
-            // Create shell tab that executes the connection command
+            // Create shell tab or split view that executes the connection command
             let connection_type = if is_exec { "exec" } else { "ssh" };
-            let shell_page = create_ssh_shell_tab(shell_id, notebook.clone(), &cmd, name);
             let shell_label = crate::ui::terminal::create_editable_tab_label(&tab_name, notebook);
 
-            notebook.append_page(&shell_page, Some(&shell_label));
+            if split_view {
+                let split_page = create_container_split_view_tab(shell_id, notebook.clone(), &cmd, name);
+                notebook.append_page(&split_page, Some(&shell_label));
+            } else {
+                let shell_page = create_ssh_shell_tab(shell_id, notebook.clone(), &cmd, name);
+                notebook.append_page(&shell_page, Some(&shell_label));
+            }
 
             // Switch to the new tab
             let page_num = notebook.n_pages() - 1;
@@ -657,6 +695,18 @@ fn connect_to_container(
 
 /// Create a shell tab that executes SSH to a container
 /// Includes target selector, command drawer, and keyboard shortcuts
+/// Create a shell tab that executes SSH to a container
+/// Includes target selector, command drawer, and keyboard shortcuts
+/// This is the public wrapper for external use
+pub fn create_container_shell(
+    shell_id: usize,
+    notebook: gtk4::Notebook,
+    ssh_cmd: &str,
+    container_name: &str,
+) -> GtkBox {
+    create_ssh_shell_tab(shell_id, notebook, ssh_cmd, container_name)
+}
+
 fn create_ssh_shell_tab(
     _shell_id: usize,
     notebook: gtk4::Notebook,
@@ -947,6 +997,187 @@ fn create_ssh_shell_tab(
     outer_container.append(&paned);
 
     outer_container
+}
+
+/// Create a split view tab with notes and container shell
+/// Includes all features: keyboard shortcuts, auto-save, markdown highlighting, command drawer
+/// Create a split view tab with notes and container shell
+/// This is the public wrapper for external use
+pub fn create_container_split_view(
+    shell_id: usize,
+    notebook: gtk4::Notebook,
+    ssh_cmd: &str,
+    container_name: &str,
+) -> Paned {
+    create_container_split_view_tab(shell_id, notebook, ssh_cmd, container_name)
+}
+
+/// Create a split view tab with notes and container shell
+/// Includes all features: keyboard shortcuts, auto-save, markdown highlighting, command drawer
+fn create_container_split_view_tab(
+    shell_id: usize,
+    notebook: gtk4::Notebook,
+    ssh_cmd: &str,
+    container_name: &str,
+) -> Paned {
+    use crate::config::{get_file_path, get_keyboard_shortcuts};
+    use crate::ui::editor::apply_markdown_highlighting;
+    use crate::ui::editor::track_notes_view;
+
+    let paned = Paned::new(Orientation::Horizontal);
+    paned.set_margin_top(6);
+    paned.set_margin_bottom(6);
+    paned.set_margin_start(6);
+    paned.set_margin_end(6);
+
+    // === Left side: Notes ===
+    let notes_container = GtkBox::new(Orientation::Vertical, 0);
+
+    let notes_scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+
+    let notes_view = TextView::builder()
+        .monospace(true)
+        .left_margin(8)
+        .right_margin(8)
+        .top_margin(8)
+        .bottom_margin(8)
+        .build();
+
+    let notes_path = get_file_path("notes.md");
+    if let Ok(content) = fs::read_to_string(&notes_path) {
+        notes_view.buffer().set_text(&content);
+    }
+
+    apply_markdown_highlighting(&notes_view);
+
+    // Track notes view for wrap mode updates
+    track_notes_view(&notes_view);
+
+    // Add text view to zoom tracking
+    crate::ui::editor::add_textview_scroll_zoom(&notes_view);
+
+    // Auto-save notes
+    let notes_path_clone = notes_path.clone();
+    let notes_view_clone = notes_view.clone();
+    let save_timeout_id: Rc<RefCell<Option<gtk4::glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let save_timeout_clone = Rc::clone(&save_timeout_id);
+
+    notes_view.buffer().connect_changed(move |buffer| {
+        let file_path = notes_path_clone.clone();
+        let notes_view_ref = notes_view_clone.clone();
+
+        if let Some(id) = save_timeout_clone.borrow_mut().take() {
+            id.remove();
+        }
+
+        apply_markdown_highlighting(&notes_view_ref);
+
+        let save_timeout_inner = Rc::clone(&save_timeout_clone);
+        let buffer_clone = buffer.clone();
+        let source_id = gtk4::glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            let start = buffer_clone.start_iter();
+            let end = buffer_clone.end_iter();
+            let text = buffer_clone.text(&start, &end, false);
+            let _ = fs::write(&file_path, text.as_str());
+            *save_timeout_inner.borrow_mut() = None;
+            gtk4::glib::ControlFlow::Break
+        });
+        *save_timeout_clone.borrow_mut() = Some(source_id);
+    });
+
+    notes_scrolled.set_child(Some(&notes_view));
+
+    // Add keyboard shortcuts for notes (Ctrl+S, Ctrl+T for target, Ctrl+Shift+T for timestamp)
+    let key_controller = gtk4::EventControllerKey::new();
+    let notes_path_clone3 = notes_path.clone();
+    let notes_view_clone3 = notes_view.clone();
+    let notes_view_clone4 = notes_view.clone();
+    let notes_view_clone5 = notes_view.clone();
+
+    key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
+        if modifier.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+            // Ctrl+S to save
+            if keyval == gtk4::gdk::Key::s {
+                let buffer = notes_view_clone3.buffer();
+                let start = buffer.start_iter();
+                let end = buffer.end_iter();
+                let text = buffer.text(&start, &end, false);
+                let _ = fs::write(&notes_path_clone3, text.as_str());
+                return gtk4::glib::Propagation::Stop;
+            }
+
+            let shortcuts = get_keyboard_shortcuts();
+            let key_name = keyval.name().unwrap_or_default().to_string();
+
+            // Ctrl+T (or custom key) for target insertion
+            if key_name == shortcuts.insert_target {
+                crate::ui::editor::show_target_selector_for_textview(&notes_view_clone4);
+                return gtk4::glib::Propagation::Stop;
+            }
+
+            // Ctrl+Shift+T (or custom key) for timestamp insertion
+            if modifier.contains(gtk4::gdk::ModifierType::SHIFT_MASK) && key_name == shortcuts.insert_timestamp {
+                let timestamp = chrono::Local::now().format("[%Y-%m-%d %H:%M:%S] ").to_string();
+                let buffer = notes_view_clone5.buffer();
+                buffer.insert_at_cursor(&timestamp);
+                return gtk4::glib::Propagation::Stop;
+            }
+        }
+        gtk4::glib::Propagation::Proceed
+    });
+    notes_view.add_controller(key_controller);
+
+    // Notes toolbar
+    let notes_bar = GtkBox::new(Orientation::Horizontal, 6);
+    notes_bar.set_margin_top(6);
+
+    let save_btn = Button::builder()
+        .icon_name("document-save-symbolic")
+        .tooltip_text("Save Notes (Ctrl+S)")
+        .build();
+    save_btn.add_css_class("flat");
+
+    let notes_path_clone2 = notes_path.clone();
+    let notes_view_clone2 = notes_view.clone();
+    save_btn.connect_clicked(move |_| {
+        let buffer = notes_view_clone2.buffer();
+        let start = buffer.start_iter();
+        let end = buffer.end_iter();
+        let text = buffer.text(&start, &end, false);
+        let _ = fs::write(&notes_path_clone2, text.as_str());
+    });
+
+    let file_label = Label::new(Some("notes.md"));
+    file_label.add_css_class("dim-label");
+    file_label.set_hexpand(true);
+    file_label.set_halign(gtk4::Align::Start);
+
+    let container_label = Label::new(Some(&format!("🔗 {}", container_name)));
+    container_label.add_css_class("dim-label");
+
+    notes_bar.append(&save_btn);
+    notes_bar.append(&file_label);
+    notes_bar.append(&container_label);
+
+    notes_container.append(&notes_scrolled);
+    notes_container.append(&notes_bar);
+
+    // === Right side: Container Shell ===
+    let shell_container = create_ssh_shell_tab(shell_id, notebook, ssh_cmd, container_name);
+
+    paned.set_start_child(Some(&notes_container));
+    paned.set_end_child(Some(&shell_container));
+    paned.set_position(400);
+    paned.set_shrink_start_child(false);
+    paned.set_shrink_end_child(false);
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+
+    paned
 }
 
 /// Creates command drawer for container SSH terminal
@@ -1741,6 +1972,7 @@ fn show_new_container_dialog(
                             &notebook_clone2,
                             &shell_counter_clone2,
                             toast_clone2.as_ref(),
+                            false, // not split view
                         );
                     });
                 }

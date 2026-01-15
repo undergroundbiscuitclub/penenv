@@ -22,6 +22,7 @@ use crate::ui::terminal::{create_shell_tab, create_split_view_tab, create_editab
                           focus_terminal_in_page, focus_terminal_in_split_view};
 use crate::ui::browser::{create_browser_tab, focus_url_entry_in_page};
 use crate::ui::container::create_container_tab;
+use crate::container::{ContainerManager, load_container_config};
 
 /// Builds and initializes the main application UI
 pub fn build_ui(app: &Application) {
@@ -82,6 +83,18 @@ fn create_main_window(app: &Application) {
         .build();
     new_shell_btn.add_css_class("flat");
 
+    // Container shell button (only if containers enabled)
+    let container_shell_btn = if is_containers_enabled() {
+        let btn = Button::builder()
+            .icon_name("application-x-executable-symbolic")
+            .tooltip_text("New Container Shell")
+            .build();
+        btn.add_css_class("flat");
+        Some(btn)
+    } else {
+        None
+    };
+
     // Add no-log shell button if logging is enabled
     let new_shell_nolog_btn = if is_command_logging_enabled() {
         let btn = Button::builder()
@@ -99,6 +112,18 @@ fn create_main_window(app: &Application) {
         .tooltip_text("Split View Mode (Ctrl+Shift+S)")
         .build();
     split_mode_btn.add_css_class("flat");
+
+    // Container split view button (only if containers enabled)
+    let container_split_btn = if is_containers_enabled() {
+        let btn = Button::builder()
+            .icon_name("view-paged-symbolic")
+            .tooltip_text("Container Split View (Notes + Container Shell)")
+            .build();
+        btn.add_css_class("flat");
+        Some(btn)
+    } else {
+        None
+    };
 
     // Browser button (only if enabled)
     let browser_btn = if is_browser_enabled() {
@@ -125,10 +150,16 @@ fn create_main_window(app: &Application) {
     };
 
     header_bar.pack_start(&new_shell_btn);
+    if let Some(ref btn) = container_shell_btn {
+        header_bar.pack_start(btn);
+    }
     if let Some(ref nolog_btn) = new_shell_nolog_btn {
         header_bar.pack_start(nolog_btn);
     }
     header_bar.pack_start(&split_mode_btn);
+    if let Some(ref btn) = container_split_btn {
+        header_bar.pack_start(btn);
+    }
     if let Some(ref btn) = browser_btn {
         header_bar.pack_start(btn);
     }
@@ -234,6 +265,40 @@ fn create_main_window(app: &Application) {
     split_mode_btn.connect_clicked(move |_| {
         create_new_split_view_tab(&notebook_clone2, &shell_counter_clone2, &toast_clone2);
     });
+
+    // Container shell button handler - show container selector dialog
+    if let Some(ref btn) = container_shell_btn {
+        let notebook_container = notebook.clone();
+        let shell_counter_container = Rc::clone(&shell_counter);
+        let toast_container = toast_overlay.clone();
+        let window_container = window.clone();
+        btn.connect_clicked(move |_| {
+            show_container_selector_dialog(
+                &window_container,
+                &notebook_container,
+                &shell_counter_container,
+                &toast_container,
+                false, // shell only
+            );
+        });
+    }
+
+    // Container split view button handler - show container selector dialog
+    if let Some(ref btn) = container_split_btn {
+        let notebook_container_split = notebook.clone();
+        let shell_counter_container_split = Rc::clone(&shell_counter);
+        let toast_container_split = toast_overlay.clone();
+        let window_container_split = window.clone();
+        btn.connect_clicked(move |_| {
+            show_container_selector_dialog(
+                &window_container_split,
+                &notebook_container_split,
+                &shell_counter_container_split,
+                &toast_container_split,
+                true, // split view
+            );
+        });
+    }
 
     // Browser button handler (only if enabled)
     if let Some(ref btn) = browser_btn {
@@ -587,6 +652,204 @@ pub fn create_new_browser_tab(notebook: &Notebook, browser_counter: &Rc<RefCell<
     let toast_msg = adw::Toast::new("New browser tab created");
     toast_msg.set_timeout(1);
     toast.add_toast(toast_msg);
+}
+
+/// Show a popup to select which container to connect to (similar to target selector)
+fn show_container_selector_dialog(
+    _parent: &adw::ApplicationWindow,
+    notebook: &Notebook,
+    shell_counter: &Rc<RefCell<usize>>,
+    toast: &adw::ToastOverlay,
+    split_view: bool,
+) {
+    let config = load_container_config();
+    let manager = ContainerManager::new(config);
+
+    // Get list of running containers
+    let containers = match manager.list_containers() {
+        Ok(c) => c,
+        Err(e) => {
+            let toast_msg = adw::Toast::new(&format!("Failed to list containers: {}", e));
+            toast_msg.set_timeout(3);
+            toast.add_toast(toast_msg);
+            return;
+        }
+    };
+
+    let running: Vec<_> = containers.into_iter().filter(|c| c.is_running()).collect();
+
+    if running.is_empty() {
+        let toast_msg = adw::Toast::new("No running containers. Start one from the Containers tab.");
+        toast_msg.set_timeout(3);
+        toast.add_toast(toast_msg);
+        return;
+    }
+
+    let mode_text = if split_view { "Container Split View" } else { "Container Shell" };
+
+    let popup = adw::Window::builder()
+        .title(&format!("Select Container for {}", mode_text))
+        .modal(true)
+        .default_width(400)
+        .default_height(350)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(380);
+
+    let popup_box = GtkBox::new(Orientation::Vertical, 12);
+    popup_box.set_margin_top(16);
+    popup_box.set_margin_bottom(16);
+    popup_box.set_margin_start(16);
+    popup_box.set_margin_end(16);
+
+    let header_label = Label::new(Some("Choose a running container:"));
+    header_label.add_css_class("dim-label");
+    header_label.set_halign(gtk::Align::Start);
+    popup_box.append(&header_label);
+
+    let scrolled = gtk::ScrolledWindow::builder()
+        .vexpand(true)
+        .build();
+
+    let list_box = gtk::ListBox::new();
+    list_box.set_selection_mode(gtk::SelectionMode::Single);
+    list_box.add_css_class("boxed-list");
+
+    for container in running.iter() {
+        let row = adw::ActionRow::new();
+        row.set_title(&container.name);
+        row.set_subtitle(&format!("{} • {}", container.status, container.image));
+        row.set_activatable(true);
+        // Add icon based on connection type
+        let icon_name = if manager.config.is_rootless() && manager.config.prefer_exec {
+            "application-x-executable-symbolic"
+        } else {
+            "utilities-terminal-symbolic"
+        };
+        row.add_prefix(&gtk::Image::from_icon_name(icon_name));
+        list_box.append(&row);
+    }
+
+    list_box.select_row(list_box.row_at_index(0).as_ref());
+    scrolled.set_child(Some(&list_box));
+
+    let button_box = GtkBox::new(Orientation::Horizontal, 8);
+    button_box.set_halign(gtk::Align::End);
+    button_box.set_margin_top(8);
+
+    let connect_btn = Button::with_label("Connect");
+    connect_btn.add_css_class("suggested-action");
+    let cancel_btn = Button::with_label("Cancel");
+
+    button_box.append(&cancel_btn);
+    button_box.append(&connect_btn);
+
+    popup_box.append(&scrolled);
+    popup_box.append(&button_box);
+
+    content.set_child(Some(&popup_box));
+    popup.set_content(Some(&content));
+
+    // Store data for callbacks
+    let running_clone = running.clone();
+    let manager_config = manager.config.clone();
+    let notebook_clone = notebook.clone();
+    let shell_counter_clone = Rc::clone(shell_counter);
+    let toast_clone = toast.clone();
+
+    // Connect button handler
+    let popup_clone = popup.clone();
+    let list_box_clone = list_box.clone();
+    let running_for_connect = running_clone.clone();
+    let manager_config_connect = manager_config.clone();
+    let notebook_connect = notebook_clone.clone();
+    let shell_counter_connect = shell_counter_clone.clone();
+    let toast_connect = toast_clone.clone();
+
+    let do_connect = move || {
+        if let Some(row) = list_box_clone.selected_row() {
+            let index = row.index() as usize;
+            if let Some(container) = running_for_connect.get(index) {
+                let mgr = ContainerManager::new(manager_config_connect.clone());
+
+                match mgr.get_connection_command(&container.name) {
+                    Ok((cmd, is_exec)) => {
+                        let shell_id = {
+                            let mut counter = shell_counter_connect.borrow_mut();
+                            *counter += 1;
+                            *counter
+                        };
+
+                        let tab_icon = if split_view { "📝" } else if is_exec { "📦" } else { "🔗" };
+                        let tab_name = format!("{} {}", tab_icon, container.name);
+                        let tab_label = create_editable_tab_label(&tab_name, &notebook_connect);
+
+                        if split_view {
+                            let split_page = crate::ui::container::create_container_split_view(
+                                shell_id,
+                                notebook_connect.clone(),
+                                &cmd,
+                                &container.name,
+                            );
+                            let page_num = notebook_connect.append_page(&split_page, Some(&tab_label));
+                            notebook_connect.set_current_page(Some(page_num));
+                        } else {
+                            let shell_page = crate::ui::container::create_container_shell(
+                                shell_id,
+                                notebook_connect.clone(),
+                                &cmd,
+                                &container.name,
+                            );
+                            let page_num = notebook_connect.append_page(&shell_page, Some(&tab_label));
+                            notebook_connect.set_current_page(Some(page_num));
+                        }
+
+                        let mode = if split_view { "split view" } else { "shell" };
+                        let toast_msg = adw::Toast::new(&format!("Connected to {} ({})", container.name, mode));
+                        toast_msg.set_timeout(2);
+                        toast_connect.add_toast(toast_msg);
+                    }
+                    Err(e) => {
+                        let toast_msg = adw::Toast::new(&format!("Failed to connect: {}", e));
+                        toast_msg.set_timeout(3);
+                        toast_connect.add_toast(toast_msg);
+                    }
+                }
+            }
+        }
+        popup_clone.close();
+    };
+
+    let do_connect_clone = do_connect.clone();
+    connect_btn.connect_clicked(move |_| {
+        do_connect_clone();
+    });
+
+    let popup_cancel = popup.clone();
+    cancel_btn.connect_clicked(move |_| {
+        popup_cancel.close();
+    });
+
+    // Double-click / Enter on row to connect
+    let do_connect_row = do_connect.clone();
+    list_box.connect_row_activated(move |_, _| {
+        do_connect_row();
+    });
+
+    // Escape key to close
+    let key_controller = gtk::EventControllerKey::new();
+    let popup_escape = popup.clone();
+    key_controller.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval == gtk::gdk::Key::Escape {
+            popup_escape.close();
+            return gtk::glib::Propagation::Stop;
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    popup.add_controller(key_controller);
+
+    popup.present();
 }
 
 /// Sets up system monitoring with periodic updates
