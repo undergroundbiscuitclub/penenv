@@ -1542,12 +1542,82 @@ fn create_containers_settings_page() -> ScrolledWindow {
     runtime_row.append(&runtime_combo);
     runtime_box.append(&runtime_row);
 
-    let runtime_hint = Label::new(Some("Podman may require sudo for full networking support"));
-    runtime_hint.add_css_class("dim-label");
-    runtime_hint.set_halign(gtk::Align::Start);
-    runtime_box.append(&runtime_hint);
-
     page.append(&runtime_box);
+
+    // === Connection Mode Section ===
+    let mode_heading = Label::new(Some("Connection Mode"));
+    mode_heading.add_css_class("title-4");
+    mode_heading.set_halign(gtk::Align::Start);
+    mode_heading.set_margin_bottom(12);
+    page.append(&mode_heading);
+
+    let mode_box = GtkBox::new(Orientation::Vertical, 8);
+    mode_box.set_margin_start(12);
+    mode_box.set_margin_bottom(24);
+
+    let mode_row = GtkBox::new(Orientation::Horizontal, 12);
+    let mode_label = Label::new(Some("Mode:"));
+    mode_label.set_width_request(120);
+    mode_label.set_halign(gtk::Align::Start);
+
+    let mode_combo = ComboBoxText::new();
+    mode_combo.append_text("Rootful (sudo, full networking)");
+    mode_combo.append_text("Rootless (no sudo, port forwarding)");
+    mode_combo.set_active(Some(match config.connection_mode {
+        crate::container::ConnectionMode::Rootful => 0,
+        crate::container::ConnectionMode::Rootless => 1,
+    }));
+    mode_combo.set_hexpand(true);
+
+    mode_row.append(&mode_label);
+    mode_row.append(&mode_combo);
+    mode_box.append(&mode_row);
+
+    let mode_hint = Label::new(Some("Rootful: Full VPN/tun support, requires authentication.\nRootless: No root required, uses port forwarding. Limited VPN support."));
+    mode_hint.add_css_class("dim-label");
+    mode_hint.set_halign(gtk::Align::Start);
+    mode_hint.set_wrap(true);
+    mode_box.append(&mode_hint);
+
+    // Determine initial runtime name for the label
+    let initial_runtime = match config.runtime {
+        ContainerRuntime::Podman => "podman",
+        ContainerRuntime::Docker => "docker",
+    };
+    let prefer_exec_check = CheckButton::with_label(&format!("Prefer '{} exec' over SSH in rootless mode", initial_runtime));
+    prefer_exec_check.set_active(config.prefer_exec);
+    prefer_exec_check.set_tooltip_text(Some("Use direct exec instead of SSH. Faster but no X11 forwarding via SSH."));
+    mode_box.append(&prefer_exec_check);
+
+    // Update the checkbox label when runtime changes
+    let prefer_exec_check_for_runtime = prefer_exec_check.clone();
+    runtime_combo.connect_changed(move |combo| {
+        let runtime_name = match combo.active() {
+            Some(0) => "podman",
+            _ => "docker",
+        };
+        prefer_exec_check_for_runtime.set_label(Some(&format!("Prefer '{} exec' over SSH in rootless mode", runtime_name)));
+    });
+
+    let ssh_port_row = GtkBox::new(Orientation::Horizontal, 12);
+    let ssh_port_label = Label::new(Some("Base SSH Port:"));
+    ssh_port_label.set_width_request(120);
+    ssh_port_label.set_halign(gtk::Align::Start);
+    let ssh_port_entry = Entry::builder()
+        .text(&config.base_ssh_port.to_string())
+        .placeholder_text("Base SSH port for rootless mode (e.g., 2222)")
+        .hexpand(true)
+        .build();
+    ssh_port_row.append(&ssh_port_label);
+    ssh_port_row.append(&ssh_port_entry);
+    mode_box.append(&ssh_port_row);
+
+    let ssh_port_hint = Label::new(Some("In rootless mode, containers use sequential ports starting from this value."));
+    ssh_port_hint.add_css_class("dim-label");
+    ssh_port_hint.set_halign(gtk::Align::Start);
+    mode_box.append(&ssh_port_hint);
+
+    page.append(&mode_box);
 
     // === Image Names Section ===
     let images_heading = Label::new(Some("Image Names"));
@@ -1756,12 +1826,19 @@ fn create_containers_settings_page() -> ScrolledWindow {
     let vnc_port_entry_clone = vnc_port_entry.clone();
     let vnc_password_entry_clone = vnc_password_entry.clone();
     let vnc_display_entry_clone = vnc_display_entry.clone();
+    let mode_combo_clone = mode_combo.clone();
+    let prefer_exec_check_clone = prefer_exec_check.clone();
+    let ssh_port_entry_clone = ssh_port_entry.clone();
 
     save_btn.connect_clicked(move |btn| {
         let new_config = ContainerConfig {
             runtime: match runtime_combo_clone.active() {
                 Some(0) => ContainerRuntime::Podman,
                 _ => ContainerRuntime::Docker,
+            },
+            connection_mode: match mode_combo_clone.active() {
+                Some(0) => crate::container::ConnectionMode::Rootful,
+                _ => crate::container::ConnectionMode::Rootless,
             },
             image_name: base_image_entry_clone.text().to_string(),
             master_image: master_image_entry_clone.text().to_string(),
@@ -1776,6 +1853,8 @@ fn create_containers_settings_page() -> ScrolledWindow {
             novnc_port: 1337,
             memory_limit: memory_entry_clone.text().to_string(),
             cpu_limit: cpu_entry_clone.text().parse().unwrap_or(10),
+            base_ssh_port: ssh_port_entry_clone.text().parse().unwrap_or(2222),
+            prefer_exec: prefer_exec_check_clone.is_active(),
         };
 
         match save_container_config(&new_config) {

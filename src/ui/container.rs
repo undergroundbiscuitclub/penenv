@@ -23,7 +23,7 @@ use std::rc::Rc;
 
 use crate::container::{
     ContainerManager, ContainerInfo,
-    load_container_config,
+    load_container_config, X11Diagnostic,
 };
 use crate::ui::dialogs::{show_settings_dialog_at_tab, settings_tabs};
 
@@ -78,6 +78,13 @@ pub fn create_container_tab(
         .build();
     settings_btn.add_css_class("flat");
 
+    // X11 diagnostic button (useful for rootless mode GUI troubleshooting)
+    let x11_btn = Button::builder()
+        .icon_name("video-display-symbolic")
+        .tooltip_text("X11 Display Diagnostics")
+        .build();
+    x11_btn.add_css_class("flat");
+
     let build_btn = Button::builder()
         .icon_name("system-run-symbolic")
         .tooltip_text("Build base image from Dockerfile")
@@ -94,18 +101,32 @@ pub fn create_container_tab(
     header_box.append(&title_box);
     header_box.append(&refresh_btn);
     header_box.append(&settings_btn);
+    header_box.append(&x11_btn);
     header_box.append(&build_btn);
     header_box.append(&new_container_btn);
 
-    // Status bar showing runtime info
+    // Status bar showing runtime info and connection mode
     let status_bar = GtkBox::new(Orientation::Horizontal, 12);
     status_bar.set_margin_bottom(8);
 
+    let mgr = manager.borrow();
+    let mode_icon = if mgr.config.is_rootful() { "🔒" } else { "🔓" };
+    let mode_name = if mgr.config.is_rootful() { "Rootful" } else { "Rootless" };
     let runtime_label = Label::new(Some(&format!(
-        "Runtime: {}",
-        manager.borrow().config.runtime.display_name()
+        "{} {} • {} Mode",
+        mode_icon,
+        mgr.config.runtime.display_name(),
+        mode_name
     )));
     runtime_label.add_css_class("dim-label");
+    drop(mgr);
+
+    let mode_hint = Label::new(Some(if manager.borrow().config.is_rootful() {
+        "Full networking with VPN support"
+    } else {
+        "No sudo required, port forwarding"
+    }));
+    mode_hint.add_css_class("dim-label");
 
     let status_label = Label::new(Some("Ready"));
     status_label.set_hexpand(true);
@@ -113,6 +134,7 @@ pub fn create_container_tab(
     status_label.add_css_class("dim-label");
 
     status_bar.append(&runtime_label);
+    status_bar.append(&mode_hint);
     status_bar.append(&status_label);
 
     // Container list
@@ -184,6 +206,15 @@ pub fn create_container_tab(
             &net_frame_clone,
             settings_tabs::CONTAINERS,
         );
+    });
+
+    // X11 diagnostic button - shows X11 configuration status
+    let manager_x11 = manager.clone();
+    let toast_x11 = toast_overlay.clone();
+    x11_btn.connect_clicked(move |btn| {
+        if let Some(window) = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok()) {
+            show_x11_diagnostic_dialog(&window, &manager_x11, toast_x11.as_ref());
+        }
     });
 
     // Build image button
@@ -566,26 +597,32 @@ fn connect_to_container(
     toast_overlay: Option<&adw::ToastOverlay>,
 ) {
     let mgr = manager.borrow();
+    let is_rootless = mgr.config.is_rootless();
+    let prefer_exec = mgr.config.prefer_exec;
 
-    // Clear SSH known hosts for this container
-    if let Err(e) = mgr.clear_ssh_known_host(name) {
-        log::warn!("Failed to clear SSH known host: {}", e);
+    // Clear SSH known hosts for this container (only needed for SSH connections)
+    if !prefer_exec || !is_rootless {
+        if let Err(e) = mgr.clear_ssh_known_host(name) {
+            log::warn!("Failed to clear SSH known host: {}", e);
+        }
     }
 
-    // Get SSH command
-    match mgr.get_ssh_command(name) {
-        Ok(ssh_cmd) => {
-            // Create a new shell tab with SSH command
+    // Get connection command (SSH or exec depending on config)
+    match mgr.get_connection_command(name) {
+        Ok((cmd, is_exec)) => {
+            // Create a new shell tab with the connection command
             let shell_id = {
                 let mut counter = shell_counter.borrow_mut();
                 *counter += 1;
                 *counter
             };
 
-            let tab_name = format!("🔗 {}", name);
+            let tab_icon = if is_exec { "📦" } else { "🔗" };
+            let tab_name = format!("{} {}", tab_icon, name);
 
-            // Create shell tab that executes SSH
-            let shell_page = create_ssh_shell_tab(shell_id, notebook.clone(), &ssh_cmd, name);
+            // Create shell tab that executes the connection command
+            let connection_type = if is_exec { "exec" } else { "ssh" };
+            let shell_page = create_ssh_shell_tab(shell_id, notebook.clone(), &cmd, name);
             let shell_label = crate::ui::terminal::create_editable_tab_label(&tab_name, notebook);
 
             notebook.append_page(&shell_page, Some(&shell_label));
@@ -595,9 +632,17 @@ fn connect_to_container(
             notebook.set_current_page(Some(page_num));
 
             if let Some(overlay) = toast_overlay {
-                let toast = adw::Toast::new(&format!("Connecting to {}...", name));
+                let mode_info = if is_rootless {
+                    if is_exec { "exec (rootless)" } else { "SSH via port forward (rootless)" }
+                } else {
+                    "SSH via IP (rootful)"
+                };
+                let toast = adw::Toast::new(&format!("Connecting to {} via {}...", name, mode_info));
                 overlay.add_toast(toast);
             }
+
+            log::info!("Connecting to container {} via {} ({})", name, connection_type,
+                if is_rootless { "rootless" } else { "rootful" });
         }
         Err(e) => {
             if let Some(overlay) = toast_overlay {
@@ -605,6 +650,7 @@ fn connect_to_container(
                 toast.set_timeout(5);
                 overlay.add_toast(toast);
             }
+            log::error!("Failed to get connection command for {}: {}", name, e);
         }
     }
 }
@@ -1323,6 +1369,215 @@ fn show_build_image_dialog(
 }
 
 /// Show the new container dialog
+/// Show X11 diagnostic dialog with current X11 configuration status
+fn show_x11_diagnostic_dialog(
+    parent: &gtk4::Window,
+    manager: &Rc<RefCell<ContainerManager>>,
+    toast_overlay: Option<&adw::ToastOverlay>,
+) {
+    let diag = ContainerManager::diagnose_x11();
+
+    // Build detailed body text
+    let body = build_x11_diagnostic_body(&diag, manager);
+
+    let dialog = gtk4::MessageDialog::builder()
+        .transient_for(parent)
+        .modal(true)
+        .buttons(gtk4::ButtonsType::None)
+        .text("X11 Display Diagnostics")
+        .secondary_text(&body)
+        .build();
+
+    dialog.add_button("Close", ResponseType::Close);
+
+    // Add "Enable X11 Access" button if xhost is available but not enabled
+    if diag.xhost_available && !diag.xhost_local_enabled {
+        dialog.add_button("Enable X11 Access", ResponseType::Apply);
+    }
+
+    // Add "Test in Container" button if we have running containers
+    let containers = manager.borrow().list_containers().unwrap_or_default();
+    let running_containers: Vec<_> = containers.iter().filter(|c| c.is_running()).collect();
+    if !running_containers.is_empty() {
+        dialog.add_button("Test in Container", ResponseType::Other(1));
+    }
+
+    let manager_clone = manager.clone();
+    let toast_clone = toast_overlay.cloned();
+    let parent_clone = parent.clone();
+
+    dialog.connect_response(move |dlg, response| {
+        match response {
+            ResponseType::Apply => {
+                match ContainerManager::enable_x11_access() {
+                    Ok(true) => {
+                        if let Some(ref toast) = toast_clone {
+                            let t = adw::Toast::new("X11 access enabled (xhost +local:)");
+                            toast.add_toast(t);
+                        }
+                        // Refresh the dialog
+                        dlg.close();
+                        show_x11_diagnostic_dialog(&parent_clone, &manager_clone, toast_clone.as_ref());
+                    }
+                    Ok(false) => {
+                        if let Some(ref toast) = toast_clone {
+                            let t = adw::Toast::new("xhost command not available");
+                            toast.add_toast(t);
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(ref toast) = toast_clone {
+                            let t = adw::Toast::new(&format!("Failed: {}", e));
+                            toast.add_toast(t);
+                        }
+                    }
+                }
+            }
+            ResponseType::Other(1) => {
+                dlg.close();
+                show_x11_test_container_dialog(&parent_clone, &manager_clone, toast_clone.as_ref());
+            }
+            _ => {
+                dlg.close();
+            }
+        }
+    });
+
+    dialog.show();
+}
+
+/// Build the diagnostic body text for X11 dialog
+fn build_x11_diagnostic_body(diag: &X11Diagnostic, manager: &Rc<RefCell<ContainerManager>>) -> String {
+    let mut lines = Vec::new();
+
+    // Overall status
+    if diag.is_ready {
+        lines.push("✅ X11 appears ready for container GUI apps\n".to_string());
+    } else {
+        lines.push("❌ X11 is not fully configured for containers\n".to_string());
+    }
+
+    // Connection mode info
+    let mgr = manager.borrow();
+    if mgr.config.is_rootless() {
+        lines.push("Mode: Rootless (X11 socket mounting)\n".to_string());
+    } else {
+        lines.push("Mode: Rootful (X11 forwarding via SSH)\n".to_string());
+    }
+    drop(mgr);
+
+    lines.push("─────────────────────────────\n".to_string());
+
+    // DISPLAY
+    if let Some(ref display) = diag.display {
+        lines.push(format!("✅ DISPLAY: {}\n", display));
+    } else {
+        lines.push("❌ DISPLAY: not set\n".to_string());
+    }
+
+    // X11 socket
+    if diag.x11_socket_exists {
+        lines.push("✅ X11 socket: /tmp/.X11-unix exists\n".to_string());
+    } else {
+        lines.push("❌ X11 socket: /tmp/.X11-unix not found\n".to_string());
+    }
+
+    // XAUTHORITY
+    if let Some(ref xauth) = diag.xauthority {
+        lines.push(format!("✅ XAUTHORITY: {}\n", xauth));
+    } else {
+        lines.push("⚠️ XAUTHORITY: not found\n".to_string());
+    }
+
+    // xhost status
+    if diag.xhost_available {
+        if diag.xhost_local_enabled {
+            lines.push("✅ xhost: local access enabled\n".to_string());
+        } else {
+            lines.push("⚠️ xhost: local access NOT enabled\n".to_string());
+            lines.push("   Run 'xhost +local:' or click 'Enable X11 Access'\n".to_string());
+        }
+    } else {
+        lines.push("⚠️ xhost: command not available\n".to_string());
+    }
+
+    // Wayland info
+    if diag.is_wayland {
+        lines.push(format!("\nℹ️ Running on Wayland: {}\n",
+            diag.wayland_display.as_deref().unwrap_or("unknown")));
+        lines.push("   Using XWayland for X11 compatibility\n".to_string());
+    }
+
+    // Issues summary
+    let issues = diag.issues();
+    if !issues.is_empty() {
+        lines.push("\n─────────────────────────────\n".to_string());
+        lines.push("Issues to fix:\n".to_string());
+        for issue in issues {
+            lines.push(format!("• {}\n", issue));
+        }
+    }
+
+    lines.join("")
+}
+
+/// Show dialog to select a container and test X11
+fn show_x11_test_container_dialog(
+    parent: &gtk4::Window,
+    manager: &Rc<RefCell<ContainerManager>>,
+    toast_overlay: Option<&adw::ToastOverlay>,
+) {
+    let containers = manager.borrow().list_containers().unwrap_or_default();
+    let running: Vec<_> = containers.into_iter().filter(|c| c.is_running()).collect();
+
+    if running.is_empty() {
+        let dialog = gtk4::MessageDialog::builder()
+            .transient_for(parent)
+            .modal(true)
+            .buttons(gtk4::ButtonsType::Ok)
+            .text("No Running Containers")
+            .secondary_text("Start a container first to test X11 connectivity.")
+            .build();
+        dialog.connect_response(|dlg, _| dlg.close());
+        dialog.show();
+        return;
+    }
+
+    // For simplicity, test the first running container
+    // A more complete implementation would show a selection dialog
+    let container_name = running[0].name.clone();
+
+    match manager.borrow().test_x11_in_container(&container_name) {
+        Ok(result) => {
+            show_x11_test_result_dialog(parent, &container_name, &result);
+        }
+        Err(e) => {
+            if let Some(toast) = toast_overlay {
+                let t = adw::Toast::new(&format!("Test failed: {}", e));
+                toast.add_toast(t);
+            }
+        }
+    }
+}
+
+/// Show the result of X11 test in a container
+fn show_x11_test_result_dialog(
+    parent: &gtk4::Window,
+    container_name: &str,
+    result: &crate::container::X11TestResult,
+) {
+    let dialog = gtk4::MessageDialog::builder()
+        .transient_for(parent)
+        .modal(true)
+        .buttons(gtk4::ButtonsType::Ok)
+        .text(&format!("X11 Test: {}", container_name))
+        .secondary_text(&result.summary())
+        .build();
+
+    dialog.connect_response(|dlg, _| dlg.close());
+    dialog.show();
+}
+
 fn show_new_container_dialog(
     parent: &gtk4::Window,
     manager: &Rc<RefCell<ContainerManager>>,
@@ -1438,7 +1693,21 @@ fn show_new_container_dialog(
         let connect = connect_check.is_active();
 
         let mgr = manager_clone.borrow();
-        match mgr.create_container(&name, use_master, detached, temporary) {
+
+        // In rootless mode, get the next available SSH port
+        let ssh_port = if mgr.config.is_rootless() {
+            match mgr.get_next_ssh_port() {
+                Ok(port) => Some(port),
+                Err(e) => {
+                    log::warn!("Failed to get next SSH port: {}, using default", e);
+                    Some(mgr.config.base_ssh_port)
+                }
+            }
+        } else {
+            None
+        };
+
+        match mgr.create_container_with_port(&name, use_master, detached, temporary, ssh_port) {
             Ok(()) => {
                 if let Some(ref overlay) = toast_clone {
                     let toast = adw::Toast::new(&format!("Container '{}' created", name));
