@@ -86,7 +86,7 @@ fn create_main_window(app: &Application) {
     // Container shell button (only if containers enabled)
     let container_shell_btn = if is_containers_enabled() {
         let btn = Button::builder()
-            .icon_name("application-x-executable-symbolic")
+            .icon_name("network-server-symbolic")
             .tooltip_text("New Container Shell")
             .build();
         btn.add_css_class("flat");
@@ -98,7 +98,7 @@ fn create_main_window(app: &Application) {
     // Add no-log shell button if logging is enabled
     let new_shell_nolog_btn = if is_command_logging_enabled() {
         let btn = Button::builder()
-            .icon_name("microphone-disabled-symbolic")
+            .icon_name("view-conceal-symbolic")
             .tooltip_text("New Shell Tab (No Logging)")
             .build();
         btn.add_css_class("flat");
@@ -116,7 +116,7 @@ fn create_main_window(app: &Application) {
     // Container split view button (only if containers enabled)
     let container_split_btn = if is_containers_enabled() {
         let btn = Button::builder()
-            .icon_name("view-paged-symbolic")
+            .icon_name("view-dual-symbolic")
             .tooltip_text("Container Split View (Notes + Container Shell)")
             .build();
         btn.add_css_class("flat");
@@ -137,33 +137,20 @@ fn create_main_window(app: &Application) {
         None
     };
 
-    // Container button (only if enabled)
-    let container_btn = if is_containers_enabled() {
-        let btn = Button::builder()
-            .icon_name("application-x-executable-symbolic")
-            .tooltip_text("Container Management")
-            .build();
-        btn.add_css_class("flat");
-        Some(btn)
-    } else {
-        None
-    };
+
 
     header_bar.pack_start(&new_shell_btn);
-    if let Some(ref btn) = container_shell_btn {
-        header_bar.pack_start(btn);
-    }
     if let Some(ref nolog_btn) = new_shell_nolog_btn {
         header_bar.pack_start(nolog_btn);
     }
     header_bar.pack_start(&split_mode_btn);
+    if let Some(ref btn) = container_shell_btn {
+        header_bar.pack_start(btn);
+    }
     if let Some(ref btn) = container_split_btn {
         header_bar.pack_start(btn);
     }
     if let Some(ref btn) = browser_btn {
-        header_bar.pack_start(btn);
-    }
-    if let Some(ref btn) = container_btn {
         header_bar.pack_start(btn);
     }
 
@@ -310,18 +297,7 @@ fn create_main_window(app: &Application) {
         });
     }
 
-    // Container button handler - switch to containers tab (only if enabled)
-    if let Some(ref btn) = container_btn {
-        let notebook_clone4 = notebook.clone();
-        btn.connect_clicked(move |_| {
-            // Find containers tab index dynamically
-            let mut container_tab_index: u32 = 2; // After Targets, Notes
-            if is_command_logging_enabled() {
-                container_tab_index += 1; // After Log
-            }
-            notebook_clone4.set_current_page(Some(container_tab_index));
-        });
-    }
+
 
     // Settings button handler
     let window_clone = window.clone();
