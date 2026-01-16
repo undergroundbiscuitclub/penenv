@@ -521,21 +521,37 @@ impl ContainerManager {
 
     /// Get container IP address
     pub fn get_container_ip(&self, name: &str) -> ContainerResult<Option<String>> {
+        // First try the top-level IPAddress (works for Podman and some Docker configs)
         let output = self.execute(&[
             "inspect", name,
             "--format", "{{.NetworkSettings.IPAddress}}"
         ])?;
 
-        if !output.status.success() {
-            return Ok(None);
+        if output.status.success() {
+            let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !ip.is_empty() {
+                return Ok(Some(ip));
+            }
         }
 
-        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if ip.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(ip))
+        // Try Docker's bridge network format: .NetworkSettings.Networks.bridge.IPAddress
+        let output = self.execute(&[
+            "inspect", name,
+            "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
+        ])?;
+
+        if output.status.success() {
+            let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !ip.is_empty() {
+                // If multiple networks, take the first non-empty IP
+                let first_ip = ip.split_whitespace().next().unwrap_or("").to_string();
+                if !first_ip.is_empty() {
+                    return Ok(Some(first_ip));
+                }
+            }
         }
+
+        Ok(None)
     }
 
     /// Get detailed container info including IP
@@ -1035,7 +1051,19 @@ impl ContainerManager {
         Ok(args)
     }
 
-    /// Get podman/docker exec command for direct container access (no SSH needed)
+    /// Get SSH tunnel arguments for VNC connection
+    /// Creates an SSH tunnel that forwards a local port to the container's VNC port
+    /// Returns (args, local_port) where local_port is the port to connect VNC to
+    pub fn get_ssh_vnc_tunnel_args(&self, name: &str, vnc_port: u16) -> ContainerResult<(Vec<String>, u16)> {
+        let key_path = self.get_ssh_privkey_path();
+        let key_path_str = key_path.to_string_lossy().to_string();
+
+        // Use a dynamic local port based on container name hash to avoid conflicts
+        let local_port = 15900 + (name.bytes().fold(0u16, |acc, b| acc.wrapping_add(b as u16)) % 1000);
+
+        let mut args = Vec::new();
+
+        if self.config.is/docker exec command for direct container access (no SSH needed)
     /// This is the preferred method in rootless mode when prefer_exec is true
     /// Note: Returns a plain host command - Flatpak wrapping is handled by terminal spawning
     pub fn get_exec_command(&self, name: &str) -> String {

@@ -7,6 +7,7 @@
 //! - Start/stop/remove containers
 //! - Connect to containers via SSH in a new shell tab
 //! - Split view with notes and container shell
+//! - Desktop view via VNC/SPICE
 //! - Build images from Dockerfile
 //! - Commit containers to master image
 //! - Configure container settings
@@ -28,6 +29,8 @@ use crate::container::{
     load_container_config, X11Diagnostic,
 };
 use crate::ui::dialogs::{show_settings_dialog_at_tab, settings_tabs};
+use crate::ui::desktop::create_desktop_tab;
+use crate::ui::terminal::create_editable_tab_label;
 
 /// Creates the container management tab
 pub fn create_container_tab(
@@ -459,6 +462,16 @@ fn create_container_row(
         split_btn.set_sensitive(false);
     }
 
+    // Desktop button (VNC/SPICE viewer)
+    let desktop_btn = Button::builder()
+        .icon_name("video-display-symbolic")
+        .tooltip_text("Open Desktop (VNC/SPICE)")
+        .build();
+    desktop_btn.add_css_class("flat");
+    if !is_running {
+        desktop_btn.set_sensitive(false);
+    }
+
     // Start/Stop button
     let start_stop_btn = if is_running {
         Button::builder()
@@ -489,6 +502,7 @@ fn create_container_row(
 
     actions_box.append(&connect_btn);
     actions_box.append(&split_btn);
+    actions_box.append(&desktop_btn);
     actions_box.append(&start_stop_btn);
     actions_box.append(&commit_btn);
     actions_box.append(&delete_btn);
@@ -535,6 +549,60 @@ fn create_container_row(
             toast_split.as_ref(),
             true, // split view
         );
+    });
+
+    // Desktop handler - opens VNC/SPICE desktop viewer in new tab
+    let name_desktop = container_name.clone();
+    let manager_desktop = manager.clone();
+    let notebook_desktop = notebook.clone();
+    let toast_desktop = toast_overlay.clone();
+    desktop_btn.connect_clicked(move |_| {
+        // Get container IP
+        let mgr = manager_desktop.borrow();
+        match mgr.get_container_ip(&name_desktop) {
+            Ok(Some(ip)) => {
+                drop(mgr);
+
+                // Create desktop tab
+                let desktop_page = create_desktop_tab(
+                    &name_desktop,
+                    &ip,
+                    notebook_desktop.clone(),
+                    toast_desktop.clone(),
+                );
+
+                let tab_label = create_editable_tab_label(
+                    &format!("🖥️ {}", name_desktop),
+                    &notebook_desktop,
+                );
+
+                let page_num = notebook_desktop.append_page(&desktop_page, Some(&tab_label));
+                notebook_desktop.set_current_page(Some(page_num));
+
+                if let Some(ref overlay) = toast_desktop {
+                    let toast = adw::Toast::new(&format!("Opening desktop for {}", name_desktop));
+                    overlay.add_toast(toast);
+                }
+            }
+            Ok(None) => {
+                drop(mgr);
+                log::error!("Container {} has no IP address", name_desktop);
+                if let Some(ref overlay) = toast_desktop {
+                    let toast = adw::Toast::new(&format!("Container {} has no IP address", name_desktop));
+                    toast.set_timeout(5);
+                    overlay.add_toast(toast);
+                }
+            }
+            Err(e) => {
+                drop(mgr);
+                log::error!("Failed to get container IP for {}: {}", name_desktop, e);
+                if let Some(ref overlay) = toast_desktop {
+                    let toast = adw::Toast::new(&format!("Failed to get IP: {}", e));
+                    toast.set_timeout(5);
+                    overlay.add_toast(toast);
+                }
+            }
+        }
     });
 
     // Start/Stop handler

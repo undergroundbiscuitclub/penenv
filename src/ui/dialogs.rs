@@ -13,7 +13,7 @@ use crate::config::{
     get_app_settings, save_app_settings, get_keyboard_shortcuts, key_to_display,
     get_text_zoom_scale, get_terminal_zoom_scale, is_command_logging_enabled, zoom,
     is_notes_wrap_text_enabled, get_browser_settings, BrowserSettings, ProxyType,
-    is_browser_enabled, is_containers_enabled,
+    is_browser_enabled, is_containers_enabled, get_desktop_settings, DesktopSettings,
 };
 use crate::commands::{load_custom_commands, save_custom_command, delete_custom_command,
                       update_custom_command, CommandTemplate};
@@ -263,7 +263,8 @@ pub mod settings_tabs {
     pub const COMMANDS: u32 = 2;
     pub const BROWSER: u32 = 3;
     pub const CONTAINERS: u32 = 4;
-    pub const ABOUT: u32 = 5;
+    pub const DESKTOP: u32 = 5;
+    pub const ABOUT: u32 = 6;
 }
 
 pub fn show_settings_dialog(
@@ -328,6 +329,11 @@ pub fn show_settings_dialog_at_tab(
     let containers_page = create_containers_settings_page();
     let containers_label = Label::new(Some("Containers"));
     notebook.append_page(&containers_page, Some(&containers_label));
+
+    // ===== DESKTOP TAB =====
+    let desktop_page = create_desktop_settings_page();
+    let desktop_label = Label::new(Some("Desktop"));
+    notebook.append_page(&desktop_page, Some(&desktop_label));
 
     // ===== ABOUT TAB =====
     let about_page = create_about_page();
@@ -1875,6 +1881,117 @@ fn create_containers_settings_page() -> ScrolledWindow {
                 let btn_clone = btn.clone();
                 gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
                     btn_clone.set_label("Save Container Settings");
+                });
+            }
+        }
+    });
+
+    button_box.append(&save_btn);
+    page.append(&button_box);
+
+    content.set_child(Some(&page));
+    scrolled.set_child(Some(&content));
+
+    scrolled
+}
+
+/// Creates the desktop settings page (noVNC WebView configuration)
+fn create_desktop_settings_page() -> ScrolledWindow {
+    let scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(500);
+
+    let page = GtkBox::new(Orientation::Vertical, 24);
+    page.set_margin_top(24);
+    page.set_margin_bottom(24);
+    page.set_margin_start(12);
+    page.set_margin_end(12);
+
+    let settings = get_desktop_settings();
+
+    // === Desktop Viewer Section ===
+    let heading = Label::new(Some("Desktop Viewer"));
+    heading.add_css_class("title-4");
+    heading.set_halign(gtk::Align::Start);
+    heading.set_margin_bottom(12);
+    page.append(&heading);
+
+    let info_box = GtkBox::new(Orientation::Vertical, 8);
+    info_box.set_margin_start(12);
+    info_box.set_margin_bottom(24);
+
+    let description = Label::new(Some(
+        "The desktop viewer uses noVNC to display container desktops.\n\
+        noVNC runs inside the container on port 1337 and provides\n\
+        browser-based VNC access with automatic scaling and reconnection."
+    ));
+    description.add_css_class("dim-label");
+    description.set_halign(gtk::Align::Start);
+    description.set_wrap(true);
+    info_box.append(&description);
+
+    page.append(&info_box);
+
+    // === Display Settings Section ===
+    let display_heading = Label::new(Some("Display Settings"));
+    display_heading.add_css_class("title-4");
+    display_heading.set_halign(gtk::Align::Start);
+    display_heading.set_margin_bottom(12);
+    page.append(&display_heading);
+
+    let display_box = GtkBox::new(Orientation::Vertical, 8);
+    display_box.set_margin_start(12);
+    display_box.set_margin_bottom(24);
+
+    // Show toolbar checkbox
+    let toolbar_check = CheckButton::with_label("Show toolbar");
+    toolbar_check.set_active(settings.show_toolbar);
+    toolbar_check.set_tooltip_text(Some("Show reload/fullscreen controls above the desktop view"));
+    display_box.append(&toolbar_check);
+
+    page.append(&display_box);
+
+    // === Save Button ===
+    let button_box = GtkBox::new(Orientation::Horizontal, 12);
+    button_box.set_halign(gtk::Align::End);
+    button_box.set_margin_top(12);
+
+    let save_btn = Button::with_label("Save Desktop Settings");
+    save_btn.add_css_class("suggested-action");
+
+    let toolbar_check_clone = toolbar_check.clone();
+
+    save_btn.connect_clicked(move |btn| {
+        let new_settings = DesktopSettings {
+            show_toolbar: toolbar_check_clone.is_active(),
+        };
+
+        // Update app settings
+        let mut app_settings = get_app_settings();
+        app_settings.desktop_settings = new_settings;
+
+        match save_app_settings(&app_settings) {
+            Ok(_) => {
+                log::info!("Desktop settings saved");
+                btn.set_label("Saved!");
+                btn.set_sensitive(false);
+                let btn_clone = btn.clone();
+                gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                    btn_clone.set_label("Save Desktop Settings");
+                    btn_clone.set_sensitive(true);
+                });
+            }
+            Err(e) => {
+                log::error!("Failed to save desktop settings: {}", e);
+                btn.set_label("Save Failed!");
+                let btn_clone = btn.clone();
+                gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                    btn_clone.set_label("Save Desktop Settings");
                 });
             }
         }

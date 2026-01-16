@@ -9,5 +9,6 @@ pub mod drawer;
 pub mod window;
 pub mod browser;
 pub mod container;
+pub mod desktop;
 
 pub use window::build_ui;

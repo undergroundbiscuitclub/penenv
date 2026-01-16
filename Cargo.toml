@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = []
 webkit = ["dep:webkit6"]
+spice = []  # SPICE support - requires spice-gtk bindings (placeholder for future)
 
 [dependencies]
 gtk4 = "0.9"
@@ -19,3 +20,6 @@ sysinfo = "0.32"
 log = "0.4"
 env_logger = "0.11"
 urlencoding = "2.1"
+
+# Desktop support
+open = "5"              # For opening URLs in external browser

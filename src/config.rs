@@ -68,6 +68,21 @@ impl Default for ProxyType {
     }
 }
 
+/// Desktop viewer settings (noVNC WebView-based)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DesktopSettings {
+    /// Whether to show the toolbar
+    pub show_toolbar: bool,
+}
+
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            show_toolbar: true,
+        }
+    }
+}
+
 /// Browser settings including proxy configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BrowserSettings {
@@ -111,6 +126,8 @@ pub struct AppSettings {
     pub enable_browser: bool,
     #[serde(default = "default_true")]
     pub enable_containers: bool,
+    #[serde(default)]
+    pub desktop_settings: DesktopSettings,
 }
 
 fn default_true() -> bool {
@@ -131,6 +148,7 @@ impl Default for AppSettings {
             browser_settings: BrowserSettings::default(),
             enable_browser: true,
             enable_containers: true,
+            desktop_settings: DesktopSettings::default(),
         }
     }
 }
@@ -138,6 +156,11 @@ impl Default for AppSettings {
 /// Gets the current browser settings
 pub fn get_browser_settings() -> BrowserSettings {
     APP_SETTINGS.with(|s| s.borrow().browser_settings.clone())
+}
+
+/// Gets the current desktop settings
+pub fn get_desktop_settings() -> DesktopSettings {
+    APP_SETTINGS.with(|s| s.borrow().desktop_settings.clone())
 }
 
 // Thread-local storage for application state

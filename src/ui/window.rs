@@ -22,6 +22,8 @@ use crate::ui::terminal::{create_shell_tab, create_split_view_tab, create_editab
                           focus_terminal_in_page, focus_terminal_in_split_view};
 use crate::ui::browser::{create_browser_tab, focus_url_entry_in_page};
 use crate::ui::container::create_container_tab;
+#[cfg(feature = "webkit")]
+use crate::ui::desktop::create_desktop_tab;
 use crate::container::{ContainerManager, load_container_config};
 
 /// Builds and initializes the main application UI
@@ -125,6 +127,19 @@ fn create_main_window(app: &Application) {
         None
     };
 
+    // Container desktop button (only if containers enabled and webkit feature)
+    #[cfg(feature = "webkit")]
+    let container_desktop_btn = if is_containers_enabled() {
+        let btn = Button::builder()
+            .icon_name("video-display-symbolic")
+            .tooltip_text("Container Desktop (VNC/noVNC)")
+            .build();
+        btn.add_css_class("flat");
+        Some(btn)
+    } else {
+        None
+    };
+
     // Browser button (only if enabled)
     let browser_btn = if is_browser_enabled() {
         let btn = Button::builder()
@@ -148,6 +163,10 @@ fn create_main_window(app: &Application) {
         header_bar.pack_start(btn);
     }
     if let Some(ref btn) = container_split_btn {
+        header_bar.pack_start(btn);
+    }
+    #[cfg(feature = "webkit")]
+    if let Some(ref btn) = container_desktop_btn {
         header_bar.pack_start(btn);
     }
     if let Some(ref btn) = browser_btn {
@@ -283,6 +302,21 @@ fn create_main_window(app: &Application) {
                 &shell_counter_container_split,
                 &toast_container_split,
                 true, // split view
+            );
+        });
+    }
+
+    // Container desktop button handler - show desktop selector dialog
+    #[cfg(feature = "webkit")]
+    if let Some(ref btn) = container_desktop_btn {
+        let notebook_desktop = notebook.clone();
+        let toast_desktop = toast_overlay.clone();
+        let window_desktop = window.clone();
+        btn.connect_clicked(move |_| {
+            show_desktop_selector_dialog(
+                &window_desktop,
+                &notebook_desktop,
+                &toast_desktop,
             );
         });
     }
@@ -828,7 +862,181 @@ fn show_container_selector_dialog(
     popup.present();
 }
 
-/// Sets up system monitoring with periodic updates
+/// Shows a dialog to select a running container for desktop (VNC/noVNC) connection
+#[cfg(feature = "webkit")]
+fn show_desktop_selector_dialog(
+    _parent: &adw::ApplicationWindow,
+    notebook: &Notebook,
+    toast: &adw::ToastOverlay,
+) {
+    let config = load_container_config();
+    let manager = ContainerManager::new(config.clone());
+
+    // Get list of running containers
+    let containers = match manager.list_containers() {
+        Ok(c) => c,
+        Err(e) => {
+            let toast_msg = adw::Toast::new(&format!("Failed to list containers: {}", e));
+            toast_msg.set_timeout(3);
+            toast.add_toast(toast_msg);
+            return;
+        }
+    };
+
+    let running: Vec<_> = containers.into_iter().filter(|c| c.is_running()).collect();
+
+    if running.is_empty() {
+        let toast_msg = adw::Toast::new("No running containers. Start one from the Containers tab.");
+        toast_msg.set_timeout(3);
+        toast.add_toast(toast_msg);
+        return;
+    }
+
+    let popup = adw::Window::builder()
+        .title("Select Container for Desktop")
+        .modal(true)
+        .default_width(400)
+        .default_height(350)
+        .build();
+
+    let content = adw::Clamp::new();
+    content.set_maximum_size(380);
+
+    let popup_box = GtkBox::new(Orientation::Vertical, 12);
+    popup_box.set_margin_top(16);
+    popup_box.set_margin_bottom(16);
+    popup_box.set_margin_start(16);
+    popup_box.set_margin_end(16);
+
+    let header_label = Label::new(Some("Choose a running container:"));
+    header_label.add_css_class("dim-label");
+    header_label.set_halign(gtk::Align::Start);
+    popup_box.append(&header_label);
+
+    let scrolled = gtk::ScrolledWindow::builder()
+        .vexpand(true)
+        .build();
+
+    let list_box = gtk::ListBox::new();
+    list_box.set_selection_mode(gtk::SelectionMode::Single);
+    list_box.add_css_class("boxed-list");
+
+    for container in running.iter() {
+        let row = adw::ActionRow::new();
+        row.set_title(&container.name);
+        row.set_subtitle(&format!("{} • {}", container.status, container.image));
+        row.set_activatable(true);
+        row.add_prefix(&gtk::Image::from_icon_name("video-display-symbolic"));
+        list_box.append(&row);
+    }
+
+    list_box.select_row(list_box.row_at_index(0).as_ref());
+    scrolled.set_child(Some(&list_box));
+
+    let button_box = GtkBox::new(Orientation::Horizontal, 8);
+    button_box.set_halign(gtk::Align::End);
+    button_box.set_margin_top(8);
+
+    let connect_btn = Button::with_label("Connect");
+    connect_btn.add_css_class("suggested-action");
+    let cancel_btn = Button::with_label("Cancel");
+
+    button_box.append(&cancel_btn);
+    button_box.append(&connect_btn);
+
+    popup_box.append(&scrolled);
+    popup_box.append(&button_box);
+
+    content.set_child(Some(&popup_box));
+    popup.set_content(Some(&content));
+
+    // Store data for callbacks
+    let running_clone = running.clone();
+    let manager_config = manager.config.clone();
+    let notebook_clone = notebook.clone();
+    let toast_clone = toast.clone();
+
+    // Connect button handler
+    let popup_clone = popup.clone();
+    let list_box_clone = list_box.clone();
+    let running_for_connect = running_clone.clone();
+    let manager_config_connect = manager_config.clone();
+    let notebook_connect = notebook_clone.clone();
+    let toast_connect = toast_clone.clone();
+
+    let do_connect = move || {
+        if let Some(row) = list_box_clone.selected_row() {
+            let index = row.index() as usize;
+            if let Some(container) = running_for_connect.get(index) {
+                let mgr = ContainerManager::new(manager_config_connect.clone());
+
+                // Get container IP for noVNC connection
+                match mgr.get_container_ip(&container.name) {
+                    Ok(Some(ip)) => {
+                        let tab_name = format!("🖥️ {}", container.name);
+                        let tab_label = create_editable_tab_label(&tab_name, &notebook_connect);
+
+                        let desktop_page = create_desktop_tab(
+                            &container.name,
+                            &ip,
+                            notebook_connect.clone(),
+                            Some(toast_connect.clone()),
+                        );
+
+                        let page_num = notebook_connect.append_page(&desktop_page, Some(&tab_label));
+                        notebook_connect.set_current_page(Some(page_num));
+
+                        let toast_msg = adw::Toast::new(&format!("Opening desktop for {}", container.name));
+                        toast_msg.set_timeout(2);
+                        toast_connect.add_toast(toast_msg);
+                    }
+                    Ok(None) => {
+                        let toast_msg = adw::Toast::new(&format!("Container {} has no IP address", container.name));
+                        toast_msg.set_timeout(3);
+                        toast_connect.add_toast(toast_msg);
+                    }
+                    Err(e) => {
+                        let toast_msg = adw::Toast::new(&format!("Failed to get IP: {}", e));
+                        toast_msg.set_timeout(3);
+                        toast_connect.add_toast(toast_msg);
+                    }
+                }
+            }
+        }
+        popup_clone.close();
+    };
+
+    let do_connect_clone = do_connect.clone();
+    connect_btn.connect_clicked(move |_| {
+        do_connect_clone();
+    });
+
+    let popup_cancel = popup.clone();
+    cancel_btn.connect_clicked(move |_| {
+        popup_cancel.close();
+    });
+
+    // Double-click / Enter on row to connect
+    let do_connect_row = do_connect.clone();
+    list_box.connect_row_activated(move |_, _| {
+        do_connect_row();
+    });
+
+    // Escape key to close
+    let key_controller = gtk::EventControllerKey::new();
+    let popup_escape = popup.clone();
+    key_controller.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval == gtk::gdk::Key::Escape {
+            popup_escape.close();
+            return gtk::glib::Propagation::Stop;
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    popup.add_controller(key_controller);
+
+    popup.present();
+}
+
 fn setup_system_monitoring(
     cpu_drawing: &gtk::DrawingArea,
     ram_drawing: &gtk::DrawingArea,
