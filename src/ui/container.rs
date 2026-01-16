@@ -1,5 +1,7 @@
 //! Container management UI for PenEnv
 //!
+//! Uses container name validation for security.
+//!
 //! Provides a GTK4 UI for managing pentest containers (Kali/etc) using podman or docker.
 //! Features include:
 //! - List all containers with status
@@ -27,6 +29,7 @@ use std::rc::Rc;
 use crate::container::{
     ContainerManager, ContainerInfo,
     load_container_config, X11Diagnostic,
+    validate_container_name,
 };
 use crate::ui::dialogs::{show_settings_dialog_at_tab, settings_tabs};
 use crate::ui::desktop::create_desktop_tab;
@@ -1711,7 +1714,7 @@ fn show_x11_diagnostic_dialog(
                 match ContainerManager::enable_x11_access() {
                     Ok(true) => {
                         if let Some(ref toast) = toast_clone {
-                            let t = adw::Toast::new("X11 access enabled (xhost +local:)");
+                            let t = adw::Toast::new("X11 access enabled for current user (xhost +SI:localuser:$USER)");
                             toast.add_toast(t);
                         }
                         // Refresh the dialog
@@ -1791,10 +1794,10 @@ fn build_x11_diagnostic_body(diag: &X11Diagnostic, manager: &Rc<RefCell<Containe
     // xhost status
     if diag.xhost_available {
         if diag.xhost_local_enabled {
-            lines.push("✅ xhost: local access enabled\n".to_string());
+            lines.push("✅ xhost: local user access enabled\n".to_string());
         } else {
-            lines.push("⚠️ xhost: local access NOT enabled\n".to_string());
-            lines.push("   Run 'xhost +local:' or click 'Enable X11 Access'\n".to_string());
+            lines.push("⚠️ xhost: local user access NOT enabled\n".to_string());
+            lines.push("   Run 'xhost +SI:localuser:$USER' or click 'Enable X11 Access'\n".to_string());
         }
     } else {
         lines.push("⚠️ xhost: command not available\n".to_string());
@@ -1976,11 +1979,13 @@ fn show_new_container_dialog(
     let notebook_clone = notebook.clone();
     let shell_counter_clone = shell_counter.clone();
     create_btn.connect_clicked(move |_| {
-        let name = name_entry.text().to_string();
+        let name = name_entry.text().to_string().trim().to_string();
 
-        if name.trim().is_empty() {
+        // Validate container name for security (alphanumeric, hyphens, underscores only)
+        if let Err(validation_error) = validate_container_name(&name) {
             if let Some(ref overlay) = toast_clone {
-                let toast = adw::Toast::new("Please enter a container name");
+                let toast = adw::Toast::new(&validation_error);
+                toast.set_timeout(5);
                 overlay.add_toast(toast);
             }
             return;

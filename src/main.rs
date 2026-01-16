@@ -19,6 +19,7 @@ mod ui;
 
 use gtk4::prelude::*;
 use gtk4::{Application, glib};
+use container::ContainerManager;
 
 fn main() -> glib::ExitCode {
     // Initialize logging
@@ -29,6 +30,13 @@ fn main() -> glib::ExitCode {
         .build();
 
     app.connect_activate(ui::build_ui);
+
+    // Cleanup X11 access when the application shuts down
+    // This ensures we don't leave xhost permissions open after the app closes
+    app.connect_shutdown(|_| {
+        log::info!("Application shutting down, cleaning up X11 access...");
+        ContainerManager::cleanup_x11_access();
+    });
 
     app.run()
 }

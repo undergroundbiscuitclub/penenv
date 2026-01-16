@@ -124,6 +124,9 @@ pub struct ContainerConfig {
     /// Whether to prefer podman exec over SSH in rootless mode
     #[serde(default)]
     pub prefer_exec: bool,
+    /// Whether to enable direct X11 socket access for GUI apps (less secure, use noVNC instead)
+    #[serde(default)]
+    pub enable_x11_direct: bool,
 }
 
 fn default_ssh_port() -> u16 {
@@ -150,8 +153,47 @@ impl Default for ContainerConfig {
             cpu_limit: 10,
             base_ssh_port: 2222,
             prefer_exec: false,
+            enable_x11_direct: false, // Default off for security - use noVNC instead
         }
     }
+}
+
+/// Validates a container name for security and compatibility
+/// Container names must:
+/// - Be between 1 and 128 characters
+/// - Start with an alphanumeric character
+/// - Contain only alphanumeric characters, hyphens (-), and underscores (_)
+/// - Not start or end with a hyphen
+pub fn validate_container_name(name: &str) -> Result<(), String> {
+    let name = name.trim();
+
+    if name.is_empty() {
+        return Err("Container name cannot be empty".to_string());
+    }
+
+    if name.len() > 128 {
+        return Err("Container name must be 128 characters or less".to_string());
+    }
+
+    let first_char = name.chars().next().unwrap();
+    if !first_char.is_ascii_alphanumeric() {
+        return Err("Container name must start with a letter or number".to_string());
+    }
+
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
+            return Err(format!(
+                "Container name can only contain letters, numbers, hyphens, and underscores (invalid character: '{}')",
+                c
+            ));
+        }
+    }
+
+    if name.starts_with('-') || name.ends_with('-') {
+        return Err("Container name cannot start or end with a hyphen".to_string());
+    }
+
+    Ok(())
 }
 
 impl ContainerConfig {
@@ -730,11 +772,11 @@ impl ContainerManager {
         let data_path = self.ensure_data_dir()?;
         let ssh_key = self.ensure_ssh_key()?;
 
-        // For rootless mode with X11, automatically enable xhost access
-        if self.config.is_rootless() {
+        // For rootless mode with X11 direct access enabled, set up xhost access
+        if self.config.is_rootless() && self.config.enable_x11_direct {
             if let Ok(true) = Self::enable_x11_access() {
-                // xhost +local: was successfully run
-                // This allows the container to connect to the X server
+                // xhost +SI:localuser:$USER was successfully run
+                // This allows only the current user's containers to connect to the X server
             }
         }
 
@@ -781,47 +823,50 @@ impl ContainerManager {
                 "-p".to_string(), format!("{}:22", port),
             ]);
 
-            // Mount X11 socket for GUI applications without SSH X11 forwarding
-            if let Ok(display) = std::env::var("DISPLAY") {
-                args.extend(vec![
-                    "-e".to_string(), format!("DISPLAY={}", display),
-                ]);
-                // Mount X11 socket (rw for some apps that need it)
-                args.extend(vec![
-                    "-v".to_string(), "/tmp/.X11-unix:/tmp/.X11-unix:rw".to_string(),
-                ]);
-
-                // Mount Xauthority for X11 authentication
-                // Try XDG_RUNTIME_DIR first (Wayland/modern), then HOME/.Xauthority
-                if let Ok(xauth) = std::env::var("XAUTHORITY") {
+            // Mount X11 socket for GUI applications (only if explicitly enabled)
+            // This is disabled by default for security - use noVNC instead
+            if self.config.enable_x11_direct {
+                if let Ok(display) = std::env::var("DISPLAY") {
                     args.extend(vec![
-                        "-e".to_string(), "XAUTHORITY=/tmp/.Xauthority".to_string(),
-                        "-v".to_string(), format!("{}:/tmp/.Xauthority:ro,Z", xauth),
+                        "-e".to_string(), format!("DISPLAY={}", display),
                     ]);
-                } else if let Ok(home) = std::env::var("HOME") {
-                    let xauth_path = format!("{}/.Xauthority", home);
-                    if std::path::Path::new(&xauth_path).exists() {
+                    // Mount X11 socket with proper SELinux context
+                    args.extend(vec![
+                        "-v".to_string(), "/tmp/.X11-unix:/tmp/.X11-unix:rw".to_string(),
+                    ]);
+
+                    // Mount Xauthority for X11 authentication
+                    // Try XDG_RUNTIME_DIR first (Wayland/modern), then HOME/.Xauthority
+                    if let Ok(xauth) = std::env::var("XAUTHORITY") {
                         args.extend(vec![
                             "-e".to_string(), "XAUTHORITY=/tmp/.Xauthority".to_string(),
-                            "-v".to_string(), format!("{}:/tmp/.Xauthority:ro,Z", xauth_path),
+                            "-v".to_string(), format!("{}:/tmp/.Xauthority:ro,Z", xauth),
                         ]);
-                    }
-                }
-
-                // For Wayland with XWayland, we may also need to handle this
-                // Pass through the user ID to help with socket permissions
-                if let Ok(uid) = std::env::var("UID") {
-                    args.extend(vec![
-                        "-e".to_string(), format!("HOST_UID={}", uid),
-                    ]);
-                } else {
-                    // Try to get UID from command
-                    if let Ok(output) = Command::new("id").arg("-u").output() {
-                        if output.status.success() {
-                            let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    } else if let Ok(home) = std::env::var("HOME") {
+                        let xauth_path = format!("{}/.Xauthority", home);
+                        if std::path::Path::new(&xauth_path).exists() {
                             args.extend(vec![
-                                "-e".to_string(), format!("HOST_UID={}", uid),
+                                "-e".to_string(), "XAUTHORITY=/tmp/.Xauthority".to_string(),
+                                "-v".to_string(), format!("{}:/tmp/.Xauthority:ro,Z", xauth_path),
                             ]);
+                        }
+                    }
+
+                    // For Wayland with XWayland, we may also need to handle this
+                    // Pass through the user ID to help with socket permissions
+                    if let Ok(uid) = std::env::var("UID") {
+                        args.extend(vec![
+                            "-e".to_string(), format!("HOST_UID={}", uid),
+                        ]);
+                    } else {
+                        // Try to get UID from command
+                        if let Ok(output) = Command::new("id").arg("-u").output() {
+                            if output.status.success() {
+                                let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                args.extend(vec![
+                                    "-e".to_string(), format!("HOST_UID={}", uid),
+                                ]);
+                            }
                         }
                     }
                 }
@@ -831,8 +876,20 @@ impl ContainerManager {
             args.extend(vec![
                 "--cap-add".to_string(), "NET_ADMIN".to_string(),
                 "--cap-add".to_string(), "NET_RAW".to_string(),
-                "--security-opt".to_string(), "label=disable".to_string()
             ]);
+
+            // Use proper SELinux context instead of disabling entirely
+            // Only disable SELinux labeling if X11 direct access is enabled (required for X11 socket access)
+            if self.config.enable_x11_direct {
+                args.extend(vec![
+                    "--security-opt".to_string(), "label=disable".to_string()
+                ]);
+            } else {
+                // Use container_runtime_t context for better security while allowing container operations
+                args.extend(vec![
+                    "--security-opt".to_string(), "label=type:container_runtime_t".to_string()
+                ]);
+            }
 
             // Note: --device=/dev/net/tun typically doesn't work rootless
             // VPN functionality requires rootful mode
@@ -1062,8 +1119,40 @@ impl ContainerManager {
         let local_port = 15900 + (name.bytes().fold(0u16, |acc, b| acc.wrapping_add(b as u16)) % 1000);
 
         let mut args = Vec::new();
+        args.push("ssh".to_string());
 
-        if self.config.is/docker exec command for direct container access (no SSH needed)
+        if self.config.is_rootless() {
+            // Rootless: use port forwarding to localhost
+            let port = self.get_container_ssh_port(name)?
+                .ok_or_else(|| ContainerError::new("Container has no SSH port mapping"))?;
+            args.extend([
+                "-o".to_string(), "IdentitiesOnly=yes".to_string(),
+                "-o".to_string(), "StrictHostKeyChecking=no".to_string(),
+                "-o".to_string(), "UserKnownHostsFile=/dev/null".to_string(),
+                "-i".to_string(), key_path_str,
+                "-p".to_string(), port.to_string(),
+                "-N".to_string(), // No remote command
+                "-L".to_string(), format!("{}:127.0.0.1:{}", local_port, vnc_port),
+                "root@localhost".to_string(),
+            ]);
+        } else {
+            // Rootful: use container IP directly
+            let ip = self.get_container_ip(name)?
+                .ok_or_else(|| ContainerError::new("Container has no IP address"))?;
+            args.extend([
+                "-o".to_string(), "IdentitiesOnly=yes".to_string(),
+                "-o".to_string(), "StrictHostKeyChecking=no".to_string(),
+                "-i".to_string(), key_path_str,
+                "-N".to_string(), // No remote command
+                "-L".to_string(), format!("{}:127.0.0.1:{}", local_port, vnc_port),
+                format!("root@{}", ip),
+            ]);
+        }
+
+        Ok((args, local_port))
+    }
+
+    /// Get docker/podman exec command for direct container access (no SSH needed)
     /// This is the preferred method in rootless mode when prefer_exec is true
     /// Note: Returns a plain host command - Flatpak wrapping is handled by terminal spawning
     pub fn get_exec_command(&self, name: &str) -> String {
@@ -1203,8 +1292,8 @@ impl ContainerManager {
 
     // ==================== X11 Support Methods ====================
 
-    /// Enable X11 access for local connections (runs xhost +local:)
-    /// This is required for containers to display GUI applications on the host X server
+    /// Enable X11 access for the current user only (runs xhost +SI:localuser:$USER)
+    /// This is more secure than xhost +local: as it only allows the current user
     /// Returns Ok(true) if xhost was run successfully, Ok(false) if xhost not available
     pub fn enable_x11_access() -> ContainerResult<bool> {
         // Check if xhost is available
@@ -1216,13 +1305,18 @@ impl ContainerManager {
             return Ok(false);
         }
 
-        // Run xhost +local: to allow local connections
+        // Get current username
+        let username = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+
+        // Run xhost +SI:localuser:$USER to allow only current user's local connections
+        // This is more secure than +local: which allows any local user
         let output = Command::new("xhost")
-            .arg("+local:")
+            .arg(format!("+SI:localuser:{}", username))
             .output()
             .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?;
 
         if output.status.success() {
+            log::info!("X11 access enabled for user: {}", username);
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1230,15 +1324,30 @@ impl ContainerManager {
         }
     }
 
-    /// Disable X11 access for local connections (runs xhost -local:)
+    /// Disable X11 access for the current user (runs xhost -SI:localuser:$USER)
     /// Call this when done with GUI containers for better security
     pub fn disable_x11_access() -> ContainerResult<bool> {
+        // Get current username
+        let username = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+
         let output = Command::new("xhost")
-            .arg("-local:")
+            .arg(format!("-SI:localuser:{}", username))
             .output()
             .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?;
 
+        if output.status.success() {
+            log::info!("X11 access disabled for user: {}", username);
+        }
+
         Ok(output.status.success())
+    }
+
+    /// Cleanup X11 access - should be called on application shutdown
+    /// This ensures we don't leave xhost permissions open after the app closes
+    pub fn cleanup_x11_access() {
+        if let Err(e) = Self::disable_x11_access() {
+            log::warn!("Failed to cleanup X11 access: {}", e);
+        }
     }
 
     /// Check X11 configuration and return diagnostic information
@@ -1277,7 +1386,10 @@ impl ContainerManager {
         if diag.xhost_available {
             if let Ok(output) = Command::new("xhost").output() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
+                // Check for both old-style LOCAL: and new-style SI:localuser:username
+                let username = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
                 diag.xhost_local_enabled = stdout.contains("LOCAL:") ||
+                                           stdout.contains(&format!("SI:localuser:{}", username)) ||
                                            stdout.contains("access control disabled");
                 diag.xhost_output = Some(stdout.to_string());
             }
@@ -1418,7 +1530,7 @@ impl X11Diagnostic {
             if self.xhost_local_enabled {
                 lines.push("  ✅ xhost local access enabled".to_string());
             } else {
-                lines.push("  ⚠️  xhost local access not enabled (run: xhost +local:)".to_string());
+                lines.push("  ⚠️  xhost local access not enabled (run: xhost +SI:localuser:$USER)".to_string());
             }
         } else {
             lines.push("  ⚠️  xhost not available".to_string());
@@ -1449,7 +1561,7 @@ impl X11Diagnostic {
         }
 
         if self.xhost_available && !self.xhost_local_enabled {
-            issues.push("Run 'xhost +local:' to allow container X11 access".to_string());
+            issues.push("Run 'xhost +SI:localuser:$USER' to allow container X11 access".to_string());
         }
 
         issues

@@ -1595,6 +1595,30 @@ fn create_containers_settings_page() -> ScrolledWindow {
     prefer_exec_check.set_tooltip_text(Some("Use direct exec instead of SSH. Faster but no X11 forwarding via SSH."));
     mode_box.append(&prefer_exec_check);
 
+    // X11 Direct Access option (disabled by default for security)
+    let x11_direct_check = CheckButton::with_label("Enable X11 direct socket access (less secure)");
+    x11_direct_check.set_active(config.enable_x11_direct);
+    x11_direct_check.set_tooltip_text(Some(
+        "Mount X11 socket directly into containers for GUI apps.\n\
+        ⚠️ Security Warning: This disables SELinux container isolation.\n\
+        Recommended: Keep disabled and use noVNC for desktop access instead."
+    ));
+    mode_box.append(&x11_direct_check);
+
+    let x11_warning = Label::new(Some("⚠️ X11 direct access requires disabling SELinux isolation. Use noVNC for better security."));
+    x11_warning.add_css_class("dim-label");
+    x11_warning.add_css_class("warning");
+    x11_warning.set_halign(gtk::Align::Start);
+    x11_warning.set_wrap(true);
+    x11_warning.set_visible(config.enable_x11_direct);
+    mode_box.append(&x11_warning);
+
+    // Show/hide warning when checkbox changes
+    let x11_warning_clone = x11_warning.clone();
+    x11_direct_check.connect_toggled(move |check| {
+        x11_warning_clone.set_visible(check.is_active());
+    });
+
     // Update the checkbox label when runtime changes
     let prefer_exec_check_for_runtime = prefer_exec_check.clone();
     runtime_combo.connect_changed(move |combo| {
@@ -1835,6 +1859,7 @@ fn create_containers_settings_page() -> ScrolledWindow {
     let mode_combo_clone = mode_combo.clone();
     let prefer_exec_check_clone = prefer_exec_check.clone();
     let ssh_port_entry_clone = ssh_port_entry.clone();
+    let x11_direct_check_clone = x11_direct_check.clone();
 
     save_btn.connect_clicked(move |btn| {
         let new_config = ContainerConfig {
@@ -1861,6 +1886,7 @@ fn create_containers_settings_page() -> ScrolledWindow {
             cpu_limit: cpu_entry_clone.text().parse().unwrap_or(10),
             base_ssh_port: ssh_port_entry_clone.text().parse().unwrap_or(2222),
             prefer_exec: prefer_exec_check_clone.is_active(),
+            enable_x11_direct: x11_direct_check_clone.is_active(),
         };
 
         match save_container_config(&new_config) {
