@@ -14,8 +14,8 @@ use crate::config::{get_config_dir, get_base_dir, is_flatpak};
 /// Container runtime choice - podman or docker
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
 pub enum ContainerRuntime {
-    #[default]
     Podman,
+    #[default]
     Docker,
 }
 
@@ -60,9 +60,9 @@ impl ContainerRuntime {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
 pub enum ConnectionMode {
     /// Rootful mode: uses sudo/pkexec, containers get real IPs, full VPN/tun support
-    #[default]
     Rootful,
     /// Rootless mode: no sudo required, uses port forwarding or exec for connection
+    #[default]
     Rootless,
 }
 
@@ -152,8 +152,8 @@ impl Default for ContainerConfig {
             memory_limit: "8g".to_string(),
             cpu_limit: 10,
             base_ssh_port: 2222,
-            prefer_exec: false,
-            enable_x11_direct: false, // Default off for security - use noVNC instead
+            prefer_exec: true,
+            enable_x11_direct: true,
         }
     }
 }
@@ -296,6 +296,18 @@ impl ContainerManager {
     /// Create a new container manager with default configuration
     pub fn with_defaults() -> Self {
         Self::new(ContainerConfig::default())
+    }
+
+    /// Update the configuration at runtime (reloads from disk)
+    pub fn reload_config(&mut self) {
+        self.config = load_container_config();
+        log::info!("Container config reloaded");
+    }
+
+    /// Update the configuration with the provided config
+    pub fn update_config(&mut self, config: ContainerConfig) {
+        self.config = config;
+        log::info!("Container config updated");
     }
 
     /// Get the base command with optional pkexec for privilege escalation
@@ -1296,10 +1308,18 @@ impl ContainerManager {
     /// This is more secure than xhost +local: as it only allows the current user
     /// Returns Ok(true) if xhost was run successfully, Ok(false) if xhost not available
     pub fn enable_x11_access() -> ContainerResult<bool> {
+        let in_flatpak = is_flatpak();
+
         // Check if xhost is available
-        let xhost_check = Command::new("which")
-            .arg("xhost")
-            .output();
+        let xhost_check = if in_flatpak {
+            Command::new("flatpak-spawn")
+                .args(["--host", "which", "xhost"])
+                .output()
+        } else {
+            Command::new("which")
+                .arg("xhost")
+                .output()
+        };
 
         if xhost_check.is_err() || !xhost_check.unwrap().status.success() {
             return Ok(false);
@@ -1310,10 +1330,17 @@ impl ContainerManager {
 
         // Run xhost +SI:localuser:$USER to allow only current user's local connections
         // This is more secure than +local: which allows any local user
-        let output = Command::new("xhost")
-            .arg(format!("+SI:localuser:{}", username))
-            .output()
-            .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?;
+        let output = if in_flatpak {
+            Command::new("flatpak-spawn")
+                .args(["--host", "xhost", &format!("+SI:localuser:{}", username)])
+                .output()
+                .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?
+        } else {
+            Command::new("xhost")
+                .arg(format!("+SI:localuser:{}", username))
+                .output()
+                .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?
+        };
 
         if output.status.success() {
             log::info!("X11 access enabled for user: {}", username);
@@ -1327,13 +1354,22 @@ impl ContainerManager {
     /// Disable X11 access for the current user (runs xhost -SI:localuser:$USER)
     /// Call this when done with GUI containers for better security
     pub fn disable_x11_access() -> ContainerResult<bool> {
+        let in_flatpak = is_flatpak();
+
         // Get current username
         let username = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
 
-        let output = Command::new("xhost")
-            .arg(format!("-SI:localuser:{}", username))
-            .output()
-            .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?;
+        let output = if in_flatpak {
+            Command::new("flatpak-spawn")
+                .args(["--host", "xhost", &format!("-SI:localuser:{}", username)])
+                .output()
+                .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?
+        } else {
+            Command::new("xhost")
+                .arg(format!("-SI:localuser:{}", username))
+                .output()
+                .map_err(|e| ContainerError::with_details("Failed to run xhost", e))?
+        };
 
         if output.status.success() {
             log::info!("X11 access disabled for user: {}", username);
@@ -1376,15 +1412,31 @@ impl ContainerManager {
         diag.has_xauthority = diag.xauthority.is_some();
 
         // Check if xhost is available
-        diag.xhost_available = Command::new("which")
-            .arg("xhost")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let in_flatpak = is_flatpak();
+        diag.xhost_available = if in_flatpak {
+            Command::new("flatpak-spawn")
+                .args(["--host", "which", "xhost"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        } else {
+            Command::new("which")
+                .arg("xhost")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
 
         // Check current xhost access control
         if diag.xhost_available {
-            if let Ok(output) = Command::new("xhost").output() {
+            let xhost_output = if in_flatpak {
+                Command::new("flatpak-spawn")
+                    .args(["--host", "xhost"])
+                    .output()
+            } else {
+                Command::new("xhost").output()
+            };
+            if let Ok(output) = xhost_output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 // Check for both old-style LOCAL: and new-style SI:localuser:username
                 let username = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
