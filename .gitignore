@@ -14,6 +14,7 @@ Cargo.lock
 .penenv_history*
 .penenv_bashrc
 .penenv_bash_env
+/docker
 
 # PenEnv generated files (optional - remove if you want to track them)
 targets.txt
