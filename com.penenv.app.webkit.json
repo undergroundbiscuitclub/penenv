@@ -7,7 +7,7 @@
   "command": "penenv",
   "finish-args": [
     "--share=ipc",
-    "--socket=fallback-x11",
+    "--socket=x11",
     "--socket=wayland",
     "--device=dri",
     "--share=network",
@@ -19,6 +19,8 @@
     "--filesystem=/run/docker.sock",
     "--filesystem=/run/podman/podman.sock",
     "--env=TERM=xterm-256color",
+    "--env=GDK_BACKEND=wayland,x11",
+    "--env=DISPLAY=:0",
     "--talk-name=org.freedesktop.Flatpak",
     "--talk-name=org.freedesktop.portal.Desktop",
     "--allow=devel"

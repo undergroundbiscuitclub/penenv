@@ -293,6 +293,9 @@ fn refresh_container_list(
         list.remove(&child);
     }
 
+    // Reload config in case settings changed
+    manager.borrow_mut().reload_config();
+
     let mgr = manager.borrow();
 
     // Check if runtime is available
