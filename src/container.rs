@@ -844,11 +844,15 @@ impl ContainerManager {
                     ]);
                     // Mount X11 socket with proper SELinux context
                     args.extend(vec![
-                        "-v".to_string(), "/tmp/.X11-unix:/tmp/.X11-unix:rw".to_string(),
+                        "-v".to_string(), "/tmp/.X11-unix:/tmp/.X11-unix:rw,Z".to_string(),
+                    ]);
+                    args.extend(vec![
+                        "--net=host".to_string()
                     ]);
 
                     // Mount Xauthority for X11 authentication
                     // Try XDG_RUNTIME_DIR first (Wayland/modern), then HOME/.Xauthority
+                    /*
                     if let Ok(xauth) = std::env::var("XAUTHORITY") {
                         args.extend(vec![
                             "-e".to_string(), "XAUTHORITY=/tmp/.Xauthority".to_string(),
@@ -863,6 +867,7 @@ impl ContainerManager {
                             ]);
                         }
                     }
+                    */
 
                     // For Wayland with XWayland, we may also need to handle this
                     // Pass through the user ID to help with socket permissions
